@@ -1,359 +1,242 @@
-import type { ReadableStream } from 'node:stream/web'
+import type { Tracer } from '@opentelemetry/api';
+import type { AxSignature } from '../dsp/sig.js';
+import type { AxGenIn, AxGenOut, AxMessage } from '../dsp/types.js';
+import type { AxAPI } from '../util/apicall.js';
 
-import type { Context, Tracer } from '@opentelemetry/api'
-
-import type { AxAPI } from '../util/apicall.js'
-
-import type { AxAIFeatures } from './base.js'
-
-export type AxAIInputModelList<TModel, TEmbedModel> = (AxAIModelListBase & {
-  isInternal?: boolean
-} & ({ model: TModel } | { embedModel: TEmbedModel }))[]
-
-export type AxAIModelListBase = {
-  key: string
-  description: string
-}
-
-export type AxAIModelList = (AxAIModelListBase &
-  ({ model: string } | { embedModel: string }))[]
-
-export type AxModelInfo = {
-  name: string
-  currency?: string
-  characterIsToken?: boolean
-  promptTokenCostPer1M?: number
-  completionTokenCostPer1M?: number
-  aliases?: string[]
-  hasThinkingBudget?: boolean
-  hasShowThoughts?: boolean
-  maxTokens?: number
-}
-
-export type AxTokenUsage = {
-  promptTokens: number
-  completionTokens: number
-  totalTokens: number
-  thoughtsTokens?: number
-}
-
-export type AxModelConfig = {
-  maxTokens?: number
-  temperature?: number
-  topP?: number
-  topK?: number
-  presencePenalty?: number
-  frequencyPenalty?: number
-  stopSequences?: string[]
-  endSequences?: string[]
-  stream?: boolean
-  n?: number
-}
+// --- Function-related types ---
+export type AxFunctionJSONSchema = {
+  type?: 'object' | 'string' | 'number' | 'boolean' | 'array' | 'null';
+  description?: string;
+  properties?: Record<string, AxFunctionJSONSchema>;
+  required?: string[];
+  items?: AxFunctionJSONSchema;
+  enum?: (string | number)[];
+  oneOf?: AxFunctionJSONSchema[];
+  format?: string;
+  nullable?: boolean;
+  maxItems?: number;
+  minItems?: number;
+  minProperties?: number;
+  maxProperties?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  example?: any;
+  anyOf?: AxFunctionJSONSchema[];
+  propertyOrdering?: string[];
+  default?: any;
+  minimum?: number;
+  maximum?: number;
+};
 
 export type AxFunctionHandler = (
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  args?: any,
-  extra?: Readonly<{
-    sessionId?: string
-    traceId?: string
-    debug?: boolean
-    ai?: AxAIService
-  }>
-) => unknown
+  args: any,
+  options?: Readonly<AxAIServiceActionOptions>
+) => unknown | Promise<unknown>;
 
-export type AxFunctionJSONSchema = {
-  type: string
-  properties?: Record<
-    string,
-    AxFunctionJSONSchema & {
-      enum?: string[]
-      description: string
-    }
-  >
-  required?: string[]
-  items?: AxFunctionJSONSchema
+export interface AxFunction {
+  name: string;
+  description: string;
+  parameters: AxFunctionJSONSchema;
+  func?: AxFunctionHandler;
 }
 
-export type AxFunction = {
-  name: string
-  description: string
-  parameters?: AxFunctionJSONSchema
-  func: AxFunctionHandler
+// --- Model and Config types ---
+export type AxModelConfig = {
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+  stream?: boolean;
+  stopSequences?: readonly string[];
+  endSequences?: readonly string[];
+  presencePenalty?: number;
+  frequencyPenalty?: number;
+  n?: number;
+};
+
+export interface AxModelInfo {
+  name: string;
+  currency: 'usd' | string;
+  promptTokenCostPer1M: number;
+  completionTokenCostPer1M: number;
+  characterIsToken?: boolean;
+  inputCostPer1KTokens?: number;
+  outputCostPer1KTokens?: number;
+  hasThinkingBudget?: boolean;
+  hasShowThoughts?: boolean;
 }
 
-export type AxChatResponseResult = {
-  content?: string
-  thought?: string
-  name?: string
-  id?: string
-  functionCalls?: {
-    id: string
-    type: 'function'
-    function: { name: string; params?: string | object }
-  }[]
-  finishReason?:
-    | 'stop'
-    | 'length'
-    | 'function_call'
-    | 'content_filter'
-    | 'error'
+export type AxAIModelMap<TModel = string, TEmbedModel = undefined> = {
+  key: TModel | string;
+  model: string;
+  description: string;
+  embedModel?: TEmbedModel | string;
+};
+export type AxAIInputModelList<
+  TModel = string,
+  TEmbedModel = undefined,
+> = Readonly<AxAIModelMap<TModel, TEmbedModel>[]>;
+
+// --- AI Service interfaces ---
+
+export interface AxAIPromptConfig {
+  showThoughts?: boolean;
+  thinkingTokenBudget?:
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'highest'
+  | 'none';
 }
 
-export type AxModelUsage = {
-  ai: string
-  model: string
-  tokens?: AxTokenUsage
+export interface AxAIServiceOptions {
+  fetch?: typeof fetch;
+  debug?: boolean;
+  tracer?: Tracer;
 }
-
-export type AxChatResponse = {
-  sessionId?: string
-  remoteId?: string
-  results: readonly AxChatResponseResult[]
-  modelUsage?: AxModelUsage
-}
-
-export type AxEmbedResponse = {
-  remoteId?: string
-  sessionId?: string
-  embeddings: readonly (readonly number[])[]
-  modelUsage?: AxModelUsage
-}
-
-export type AxModelInfoWithProvider = AxModelInfo & { provider: string }
-
-export type AxChatRequest<TModel = string> = {
-  chatPrompt: (
-    | { role: 'system'; content: string; cache?: boolean }
-    | {
-        role: 'user'
-        name?: string
-        content:
-          | string
-          | (
-              | {
-                  type: 'text'
-                  text: string
-                  cache?: boolean
-                }
-              | {
-                  type: 'image'
-                  mimeType: string
-                  image: string
-                  details?: 'high' | 'low' | 'auto'
-                  cache?: boolean
-                }
-              | {
-                  type: 'audio'
-                  data: string
-                  format?: 'wav'
-                  cache?: boolean
-                }
-            )[]
-      }
-    | {
-        role: 'assistant'
-        content?: string
-        name?: string
-        functionCalls?: {
-          id: string
-          type: 'function'
-          function: { name: string; params?: string | object }
-        }[]
-        cache?: boolean
-      }
-    | {
-        role: 'function'
-        result: string
-        isError?: boolean
-        functionId: string
-        cache?: boolean
-      }
-  )[]
-  functions?: Readonly<{
-    name: string
-    description: string
-    parameters?: AxFunctionJSONSchema
-  }>[]
-  functionCall?:
-    | 'none'
-    | 'auto'
-    | 'required'
-    | { type: 'function'; function: { name: string } }
-  modelConfig?: AxModelConfig
-  model?: TModel
-}
-
-export interface AxAIServiceMetrics {
-  latency: {
-    chat: {
-      mean: number
-      p95: number
-      p99: number
-      samples: number[]
-    }
-    embed: {
-      mean: number
-      p95: number
-      p99: number
-      samples: number[]
-    }
-  }
-  errors: {
-    chat: {
-      count: number
-      rate: number
-      total: number
-    }
-    embed: {
-      count: number
-      rate: number
-      total: number
-    }
-  }
-}
-
-export type AxInternalChatRequest<TModel> = Omit<AxChatRequest, 'model'> &
-  Required<Pick<AxChatRequest<TModel>, 'model'>>
-
-export type AxEmbedRequest<TEmbedModel = string> = {
-  texts?: readonly string[]
-  embedModel?: TEmbedModel
-}
-
-export type AxInternalEmbedRequest<TEmbedModel> = Omit<
-  AxEmbedRequest,
-  'embedModel'
-> &
-  Required<Pick<AxEmbedRequest<TEmbedModel>, 'embedModel'>>
-
-export type AxRateLimiterFunction = <T = unknown>(
-  reqFunc: () => Promise<T | ReadableStream<T>>,
-  info: Readonly<{ modelUsage?: AxModelUsage }>
-) => Promise<T | ReadableStream<T>>
-
-export type AxLoggerTag =
-  | 'error'
-  | 'warning'
-  | 'success'
-  | 'functionName'
-  | 'functionArg'
-  | 'functionEnd'
-  | 'responseStart'
-  | 'responseContent'
-  | 'responseEnd'
-  | 'requestStart'
-  | 'requestContent'
-  | 'requestEnd'
-  | 'systemStart'
-  | 'systemContent'
-  | 'systemEnd'
-  | 'userStart'
-  | 'userContent'
-  | 'userEnd'
-  | 'assistantStart'
-  | 'assistantContent'
-  | 'assistantEnd'
-  | 'discovery'
 
 export type AxLoggerFunction = (
   message: string,
-  options?: { tags?: AxLoggerTag[] }
-) => void
+  options: {
+    tags: string[];
+  }
+) => void;
 
-export type AxAIPromptConfig = {
-  stream?: boolean
-  thinkingTokenBudget?:
-    | 'minimal'
-    | 'low'
-    | 'medium'
-    | 'high'
-    | 'highest'
-    | 'none'
-  showThoughts?: boolean
+export type AxRateLimiterFunction = (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  func: () => Promise<any>,
+  info: {
+    modelUsage: AxChatResponse['modelUsage'];
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+) => Promise<any>;
+
+export interface AxAIServiceActionOptions {
+  sessionId?: string;
+  traceId?: string;
+  abortSignal?: AbortSignal;
+  ai?: AxAIService;
 }
 
-export type AxAIServiceOptions = {
-  debug?: boolean
-  rateLimiter?: AxRateLimiterFunction
-  fetch?: typeof fetch
-  tracer?: Tracer
-  timeout?: number
-  excludeContentFromTrace?: boolean
-  abortSignal?: AbortSignal
-  logger?: AxLoggerFunction
-}
+// --- Chat request/response types ---
+export type AxChatRequest = {
+  // Can be a standard message array or a provider-specific request object
+  chatPrompt: ReadonlyArray<AxMessage> | object;
+  functions?: readonly AxFunction[];
+  functionCall?: 'auto' | 'none' | 'required' | { name: string };
+  modelConfig?: Readonly<Partial<AxModelConfig>>;
+  model?: string;
+  signature?: AxSignature;
+};
 
-export type AxAIServiceActionOptions<
-  TModel = unknown,
-  TEmbedModel = unknown,
-> = {
-  ai?: Readonly<AxAIService<TModel, TEmbedModel>>
-  sessionId?: string
-  traceId?: string
-  timeout?: number
-  rateLimiter?: AxRateLimiterFunction
-  debug?: boolean
-  debugHideSystemPrompt?: boolean
-  traceContext?: Context
-  abortSignal?: AbortSignal
-  logger?: AxLoggerFunction
-}
+export type AxChatResponseResult = {
+  content?: string | null;
+  functionCalls?: {
+    id: string;
+    type: 'function';
+    function: { name: string; params: object | string };
+  }[];
+  finishReason?:
+  | 'stop'
+  | 'length'
+  | 'function_calls'
+  | 'content_filter'
+  | 'other'
+  | string;
+  name?: string;
+  thought?: string;
+};
 
-export interface AxAIService<TModel = unknown, TEmbedModel = unknown> {
-  getId(): string
-  getName(): string
-  getFeatures(model?: TModel): AxAIFeatures
-  getModelList(): AxAIModelList | undefined
-  getMetrics(): AxAIServiceMetrics
-  getLogger(): AxLoggerFunction
+export type AxTokenUsage = {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  thoughtsTokens?: number;
+};
 
-  getLastUsedChatModel(): TModel | undefined
-  getLastUsedEmbedModel(): TEmbedModel | undefined
-  getLastUsedModelConfig(): AxModelConfig | undefined
+export type AxChatResponse = {
+  results: AxChatResponseResult[];
+  modelUsage?: AxTokenUsage & {
+    ai: string;
+    model: string;
+  };
+};
 
+// --- Embed request/response types ---
+export type AxEmbedResponse = {
+  embeddings: number[][];
+  modelUsage?: AxTokenUsage & {
+    ai: string;
+    model: string;
+  };
+};
+
+// --- Internal request types used by the Base AI class ---
+export type AxInternalChatRequest<TModel> = AxChatRequest & { model?: TModel };
+export type AxInternalEmbedRequest<TEmbedModel> = {
+  texts: readonly string[];
+  embedModel?: TEmbedModel;
+};
+
+// --- The core AI Service interface ---
+export interface AxAIService {
   chat(
-    req: Readonly<AxChatRequest<TModel>>,
+    req: Readonly<AxChatRequest>,
     options?: Readonly<
-      AxAIPromptConfig & AxAIServiceActionOptions<TModel, TEmbedModel>
+      AxAIServiceActionOptions &
+      AxAIPromptConfig & {
+        rateLimiter?: AxRateLimiterFunction;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        traceContext?: any;
+        debug?: boolean;
+      }
     >
-  ): Promise<AxChatResponse | ReadableStream<AxChatResponse>>
-  embed(
-    req: Readonly<AxEmbedRequest<TEmbedModel>>,
-    options?: Readonly<AxAIServiceActionOptions<TModel, TEmbedModel>>
-  ): Promise<AxEmbedResponse>
+  ): Promise<AxChatResponse | ReadableStream<AxChatResponse>>;
 
-  setOptions(options: Readonly<AxAIServiceOptions>): void
-  getOptions(): Readonly<AxAIServiceOptions>
+  embed(
+    req: Readonly<{ texts: readonly string[]; embedModel?: string }>,
+    options?: Readonly<AxAIServiceActionOptions>
+  ): Promise<AxEmbedResponse>;
+
+  getOptions(): Readonly<AxAIServiceOptions>;
+  getLogger(): AxLoggerFunction;
+  getName(): string;
+  getModelList(): AxAIInputModelList;
+  getFeatures(model?: string): {
+    functions: boolean;
+    streaming: boolean;
+    json: boolean;
+    hasThinkingBudget: boolean;
+    hasShowThoughts: boolean;
+    functionCot: boolean;
+  };
+  getLastUsedChatModel(): string | undefined;
+  getLastUsedModelConfig(): Readonly<AxModelConfig> | undefined;
 }
 
+// --- The implementation interface for a specific AI provider ---
 export interface AxAIServiceImpl<
   TModel,
   TEmbedModel,
-  TChatRequest,
-  TEmbedRequest,
-  TChatResponse,
-  TChatResponseDelta,
-  TEmbedResponse,
+  TChatReq,
+  TEmbedReq,
+  TChatResp,
+  TChatStreamResp,
+  TEmbedResp,
 > {
+  getModelConfig(): AxModelConfig;
+  getTokenUsage(): AxTokenUsage | undefined;
   createChatReq(
     req: Readonly<AxInternalChatRequest<TModel>>,
     config: Readonly<AxAIPromptConfig>
-  ): [AxAPI, TChatRequest]
-
-  createChatResp(resp: Readonly<TChatResponse>): AxChatResponse
-
-  createChatStreamResp?(
-    resp: Readonly<TChatResponseDelta>,
-    state: object
-  ): AxChatResponse
-
-  createEmbedReq?(
+  ): [AxAPI, TChatReq]; // AxAPI is from apicall.ts
+  createEmbedReq(
     req: Readonly<AxInternalEmbedRequest<TEmbedModel>>
-  ): [AxAPI, TEmbedRequest]
-
-  createEmbedResp?(resp: Readonly<TEmbedResponse>): AxEmbedResponse
-
-  getModelConfig(): AxModelConfig
-
-  getTokenUsage(): AxTokenUsage | undefined
+  ): [AxAPI, TEmbedReq];
+  createChatResp(resp: Readonly<TChatResp>): AxChatResponse;
+  createChatStreamResp(resp: Readonly<TChatStreamResp>): AxChatResponse;
+  createEmbedResp(resp: Readonly<TEmbedResp>): AxEmbedResponse;
 }

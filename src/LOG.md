@@ -3,49 +3,42 @@ Running program. The raw request payload will be logged below...
 URL: https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-preview-0514:streamGenerateContent?alt=sse&key=dummy-api-key-for-testing
 Headers: {
   "Content-Type": "application/json",
-  "X-Request-ID": "e16794ee-350d-4c5e-9e02-ba8b2916ba0b",
+  "X-Request-ID": "b832007e-2d37-4896-bd55-42ea361ea50c",
   "X-Retry-Count": "0"
 }
 Request Body (Payload):
 {
+  "systemInstruction": {
+    "role": "user",
+    "parts": [
+      {
+        "text": "## Core Instruction\nYou will be provided with the following inputs: `<organization>`, `<userInstruction>`, `<tweet>`. Your core task is to fulfill the #main-task-description using the resources available and generate the following outputs: `<generatedScripts>`.\n\n## Input Definitions\n<organization type=\"json\" description=\"JSON object containing details about the organization, its marketing funnels, and creator agents with their video styles and gestures\">\n    <description type=\"string\" description=\"gives an overview of organization\" />\n    <marketingFunnels type=\"json\" isArray=\"true\">\n    <description type=\"string\" description=\"Description of the marketing funnel's goal\" />\n</marketingFunnels>\n    <creatorAgents type=\"json\" isArray=\"true\">\n    <name type=\"string\" description=\"full name of the agent\" />\n    <role type=\"string\" description=\"the agents role at the organization\" />\n    <tone type=\"string\" description=\"a description of the agents voice tone\" />\n    <personality type=\"string\" description=\"a description of the agents personality\" />\n    <voice type=\"json\">\n    <id type=\"string\" description=\"Elevenlab's voice ID\" />\n</voice>\n    <videoStyles type=\"json\" isArray=\"true\">\n    <id type=\"string\" description=\"Argil Avatar ID\" />\n    <description type=\"string\" description=\"description of the camera video style/avatar scene - for LLM context only\" />\n    <gestures type=\"json\" isArray=\"true\">\n    <id type=\"string\" description=\"Argil gesture slug, e.g., 'gesture-1\" />\n    <description type=\"string\" description=\"textual description of the gesture - for LLM context only\" />\n</gestures>\n</videoStyles>\n</creatorAgents>\n</organization>\n<userInstruction type=\"string\" description=\"Text instruction from the user about the desired content.\" />\n<tweet type=\"enum\" isArray=\"true\" enumType=\"algebraic\" enumValues=\"image,video,string\" />\n\n## Input Referencing Guide\nAll inputs and their nested properties can be referenced anywhere in this program using XML's XPath language. The inline format looks like <xpath path=\"//path/to/variable\" />.\n\n## Main Task Description\nBased on the <xpath>//organization</xpath> and the <xpath>//userInstruction</xpath> generate an appropriate amount of short-form video content scripts. Ensure that each script serves at least one of the <xpath>//organization/marketingFunnels</xpath>. You may generate as many scripts as you want, but ensure each script provides unique value. You have different variables to play with, such as who is the speaker (author) of the content, choosing which agent creator's voice and personality best fits the content. You must generate at least 1 script."
+      }
+    ]
+  },
   "contents": [
     {
       "role": "user",
       "parts": [
         {
-          "text": "<scope-definitions>\n<tweet type=\"enum\" isArray=\"true\" values=\"image,video,string\" />\n</scope-definitions>"
+          "text": "## Inputs\n<organization>{\n  \"description\": \"A test organization for creating content.\",\n  \"marketingFunnels\": [\n    {\n      \"description\": \"Awareness\"\n    }\n  ],\n  \"creatorAgents\": [\n    {\n      \"name\": \"Test Agent\",\n      \"role\": \"Content Creator\",\n      \"tone\": \"Informative\",\n      \"personality\": \"Engaging\",\n      \"voice\": {\n        \"id\": \"voice-123\"\n      },\n      \"videoStyles\": [\n        {\n          \"id\": \"avatar-abc\",\n          \"description\": \"A cool video style\",\n          \"gestures\": [\n            {\n              \"id\": \"gesture-xyz\",\n              \"description\": \"A wave\"\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}</organization><userInstruction>make a video script about this <xpath>//tweet</xpath></userInstruction><tweet>"
         },
         {
-          "text": "<tweet>"
-        },
-        {
-          "text": "{\n  \"mimeType\": \"image/jpeg\",\n  \"fileUri\": \"gs://bucket/landscape.jpg\"\n}"
+          "fileData": {
+            "mimeType": "image/jpeg",
+            "fileUri": "gs://bucket/landscape.jpg"
+          }
         },
         {
           "text": "</tweet>"
-        },
-        {
-          "text": "<organization>{\n  \"description\": \"A test organization for creating content.\",\n  \"marketingFunnels\": [\n    {\n      \"description\": \"Awareness\"\n    }\n  ],\n  \"creatorAgents\": [\n    {\n      \"name\": \"Test Agent\",\n      \"role\": \"Content Creator\",\n      \"tone\": \"Informative\",\n      \"personality\": \"Engaging\",\n      \"voice\": {\n        \"id\": \"voice-123\"\n      },\n      \"videoStyles\": [\n        {\n          \"id\": \"avatar-abc\",\n          \"description\": \"A cool video style\",\n          \"gestures\": [\n            {\n              \"id\": \"gesture-xyz\",\n              \"description\": \"A wave\"\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}</organization>"
-        },
-        {
-          "text": "<userInstruction>make a video script about this <xpath>//tweet</xpath></userInstruction>"
         }
       ]
     }
   ],
-  "systemInstruction": {
-    "role": "user",
-    "parts": [
-      {
-        "text": "You will be provided with the following fields: `Organization`, `User Instruction`. Your task is to generate new fields: `Generated Scripts`.\n\nYou can reference inputs and scope variables using the format <xpath>//path/to/variable</xpath>.\n\n<input-definitions>\n<organization type=\"json\" description=\"JSON object containing details about the organization, its marketing funnels, and creator agents with their video styles and gestures\">\n    <description type=\"string\" description=\"gives an overview of organization\" />\n    <marketingFunnels type=\"json\" isArray=\"true\">\n    <description type=\"string\" description=\"Description of the marketing funnel's goal\" />\n</marketingFunnels>\n    <creatorAgents type=\"json\" isArray=\"true\">\n    <name type=\"string\" description=\"full name of the agent\" />\n    <role type=\"string\" description=\"the agents role at the organization\" />\n    <tone type=\"string\" description=\"a description of the agents voice tone\" />\n    <personality type=\"string\" description=\"a description of the agents personality\" />\n    <voice type=\"json\">\n    <id type=\"string\" description=\"Elevenlab's voice ID\" />\n</voice>\n    <videoStyles type=\"json\" isArray=\"true\">\n    <id type=\"string\" description=\"Argil Avatar ID\" />\n    <description type=\"string\" description=\"description of the camera video style/avatar scene - for LLM context only\" />\n    <gestures type=\"json\" isArray=\"true\">\n    <id type=\"string\" description=\"Argil gesture slug, e.g., 'gesture-1\" />\n    <description type=\"string\" description=\"textual description of the gesture - for LLM context only\" />\n</gestures>\n</videoStyles>\n</creatorAgents>\n</organization>\n<userInstruction type=\"string\" description=\"Text instruction from the user about the desired content.\" />\n</input-definitions>\n\nBased on the <xpath>//organization</xpath> and the <xpath>//userInstruction</xpath> generate an appropriate amount of short-form video content scripts. Ensure that each script serves at least one of the <xpath>//organization/marketingFunnels</xpath>. You may generate as many scripts as you want, but ensure each script provides unique value. You have different variables to play with, such as who is the speaker (author) of the content, choosing which agent creator's voice and personality best fits the content. You must generate at least 1 script.\n\n<output-definitions>\n<generatedScripts type=\"json\" isArray=\"true\">\n    <author type=\"string\" description=\"Full name of the CreatorAgent\" />\n    <title type=\"string\" description=\"script title\" />\n    <description type=\"string\" description=\"description for the video platform\" />\n    <marketingGoals type=\"json\" isArray=\"true\">\n    <marketingFunnelDescription type=\"string\" />\n    <reasoning type=\"string\" description=\"the LLMs reasoning for why this script serves the choosen marketing funnel\" />\n</marketingGoals>\n    <moments type=\"json\" isArray=\"true\">\n    <transcript type=\"string\" description=\"the moment's spoken text\" />\n    <notes type=\"string\" description=\"notes that the LLM has regarding how a person should edit this moment such as suggested broll prompts, animations or transitions\" />\n    <agentVideo type=\"json\">\n    <videoStyleId type=\"string\" description=\"the Argil Avatar ID selected from one of <xpath>//organization/creatorAgents/videoStyles/id</xpath>\" />\n    <gestureSlug type=\"string\" description=\"the Argil gesture-slug belonging to the chosen <xpath>//videoStyleId</xpath> selected from one of <xpath>//organization/creatorAgents/videoStyles/gestures/id</xpath>\" />\n    <sizeStyle type=\"enum\" description=\"the suggested size of the generated avatar video when exported to the video editor\" values=\"FULL,HALF,PILL\" />\n    <position type=\"enum\" description=\"the suggested position of the generated avatar video when exported to the video editor\" values=\"CENTER,BOTTOM_LEFT,BOTTOM_RIGHT,TOP_LEFT,TOP_RIGHT\" />\n</agentVideo>\n</moments>\n</generatedScripts>\n</output-definitions>\n\nThe first user message part contains scope definitions and values."
-      }
-    ]
-  },
   "generationConfig": {
     "temperature": 0,
     "topP": 0.9,
     "topK": 40,
-    "candidateCount": 1,
     "responseMimeType": "application/json",
     "responseSchema": {
       "type": "object",
@@ -156,27 +149,10 @@ Request Body (Payload):
       },
       "required": [
         "generatedScripts"
-      ]
+      ],
+      "description": "Based on the <xpath>//organization</xpath> and the <xpath>//userInstruction</xpath> generate an appropriate amount of short-form video content scripts. Ensure that each script serves at least one of the <xpath>//organization/marketingFunnels</xpath>. You may generate as many scripts as you want, but ensure each script provides unique value. You have different variables to play with, such as who is the speaker (author) of the content, choosing which agent creator's voice and personality best fits the content. You must generate at least 1 script."
     }
-  },
-  "safetySettings": [
-    {
-      "category": "HARM_CATEGORY_HARASSMENT",
-      "threshold": "BLOCK_NONE"
-    },
-    {
-      "category": "HARM_CATEGORY_HATE_SPEECH",
-      "threshold": "BLOCK_NONE"
-    },
-    {
-      "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-      "threshold": "BLOCK_NONE"
-    },
-    {
-      "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-      "threshold": "BLOCK_NONE"
-    }
-  ]
+  }
 }
 ------------------------------------
 

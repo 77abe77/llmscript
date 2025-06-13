@@ -1,9 +1,12 @@
-import type { AxAIGoogleGeminiContentPart } from '../ai/google-gemini/types.js'
-import type { AxChatRequest } from '../ai/types.js'
+import type {
+  AxAIGoogleGeminiChatRequest,
+  AxAIGoogleGeminiContent,
+  AxAIGoogleGeminiContentPart,
+} from '../ai/google-gemini/types.js'
+import type { AxFunction } from '../ai/types.js'
 
 import { formatDateWithTimezone } from './datetime.js'
-import type { AxInputFunctionType } from './functions.js'
-import { type AxField, type AxIField, type AxSignature } from './sig.js'
+import { type AxField, type AxSignature } from './sig.js'
 import type {
   AxFileData,
   AxFieldValue,
@@ -14,16 +17,11 @@ import type {
 } from './types.js'
 import { validateValue } from './util.js'
 
-type Writeable<T> = { -readonly [P in keyof T]: T[P] }
-
 // Define options type for AxPromptTemplate constructor
 export interface AxPromptTemplateOptions {
-  functions?: Readonly<AxInputFunctionType>
+  functions?: Readonly<AxFunction[]>
   thoughtFieldName?: string
 }
-type AxChatRequestChatPrompt = Writeable<AxChatRequest['chatPrompt'][0]>
-
-type ChatRequestUserMessage = AxAIGoogleGeminiContentPart[]
 
 const functionCallInstructions = `
 ## Function Call Instructions
@@ -31,31 +29,15 @@ const functionCallInstructions = `
 - Call functions step-by-step, using the output of one function as input to the next.
 - Use the function results to generate the output fields.`
 
-export type AxFieldTemplateFn = (
-  field: Readonly<AxField>,
-  value: Readonly<AxFieldValue>
-) => ChatRequestUserMessage
-
 function xmlEscape(str: string): string {
   if (typeof str !== 'string') {
     return ''
   }
-  return str.replace(/[<>&"']/g, (c) => {
-    switch (c) {
-      case '<':
-        return '<'
-      case '>':
-        return '>'
-      case '&':
-        return '&'
-      case '"':
-        return '"'
-      case "'":
-        return "'"
-      default:
-        return c
-    }
-  })
+  // Do not escape '<' and '>' for xpath tags, but escape other special XML characters.
+  return str
+    .replace(/&/g, '&')
+    .replace(/"/g, '"')
+    .replace(/'/g, "'")
 }
 
 function fieldToXMLDef(field: AxField<any>): string {
@@ -63,7 +45,7 @@ function fieldToXMLDef(field: AxField<any>): string {
     `type="${field.type}"`,
     field.isArray ? 'isArray="true"' : '',
     field.fieldDescription
-      ? `fieldDescription="${xmlEscape(field.fieldDescription)}"`
+      ? `description="${xmlEscape(field.fieldDescription)}"`
       : '',
   ]
     .filter(Boolean)
@@ -82,66 +64,14 @@ function fieldToXMLDef(field: AxField<any>): string {
 
 export class AxPromptTemplate {
   private sig: Readonly<AxSignature>
-  private fieldTemplates?: Record<string, AxFieldTemplateFn>
-  private readonly thoughtFieldName: string
-  private readonly functions?: Readonly<AxInputFunctionType>
+  private readonly functions?: Readonly<AxFunction[]>
 
   constructor(
     sig: Readonly<AxSignature>,
-    options?: Readonly<AxPromptTemplateOptions>,
-    fieldTemplates?: Record<string, AxFieldTemplateFn>
+    options?: Readonly<AxPromptTemplateOptions>
   ) {
     this.sig = sig
-    this.fieldTemplates = fieldTemplates
-    this.thoughtFieldName = options?.thoughtFieldName ?? 'thought'
     this.functions = options?.functions
-  }
-
-  public renderExtraFields = (extraFields: readonly AxIField[]) => {
-    const prompt: ChatRequestUserMessage = []
-
-    if (!extraFields || extraFields.length === 0) {
-      return prompt
-    }
-
-    const groupedFields = extraFields.reduce(
-      (acc, field) => {
-        const title = field.title
-        if (!acc[title]) {
-          acc[title] = []
-        }
-        acc[title].push(field)
-        return acc
-      },
-      {} as Record<string, AxIField[]>
-    )
-
-    const formattedGroupedFields = Object.entries(groupedFields)
-      .map(([title, fields]) => {
-        if (fields.length === 1) {
-          const field = fields[0]!
-          return {
-            ...field,
-            description: field.fieldDescription,
-          }
-        } else if (fields.length > 1) {
-          const valuesList = fields
-            .map((field) => `- ${field.fieldDescription}`)
-            .join('\n')
-          return {
-            ...fields[0]!,
-            description: valuesList,
-          }
-        }
-      })
-      .filter(Boolean) as AxIField[]
-
-    formattedGroupedFields.forEach((field) => {
-      const value = field.description
-      prompt.push(...this.valueToParts(field.name, value, field))
-    })
-
-    return prompt
   }
 
   public render = <T extends AxGenIn>(
@@ -151,225 +81,278 @@ export class AxPromptTemplate {
       demos,
       scope,
     }: Readonly<{
-      skipSystemPrompt?: boolean
       examples?: Record<string, AxFieldValue>[]
       demos?: Record<string, AxFieldValue>[]
       scope?: Readonly<
         Map<string, { field: AxField<any>; value: AxFieldValue }>
       >
     }>
-  ): AxChatRequest['chatPrompt'] => {
+  ): AxAIGoogleGeminiChatRequest => {
     // System Prompt Construction
     const systemTask = []
     const ins = this.sig.getInputFields()
-    const outs = this.sig.getOutputFields()
-    const inArgs = renderDescFields(ins)
-    const outArgs = renderDescFields(outs)
+    const scopeIns = scope ? Array.from(scope.values()).map((v) => v.field) : []
+    const allIns = [...ins, ...scopeIns]
+
+    const outArgs = renderDescFields(this.sig.getOutputFields())
     const desc = this.sig.getDescription()
+
     systemTask.push(
       `## Core Instruction
-${ins.length ? `You will be provided with the following inputs: ${inArgs}. ` : ''}Your core task is to ${desc ? `fullfill the #main-task-description using the resources available${outs.length ? ' and' : '.'}` : ''}${this.sig.getOutputFields().length ? `generate outputs: ${outArgs}.` : ''}`
+${allIns.length > 0 ? `You will be provided with the following inputs: ${renderDescFields(allIns)}. ` : ''}Your core task is to ${desc ? `fulfill the #main-task-description using the resources available${outArgs.length > 0 ? ' and' : '.'}` : ''}${this.sig.getOutputFields().length > 0 ? ` generate the following outputs: ${outArgs}.` : ''}`
     )
 
-    if (scope && scope.size > 0) {
-      systemTask.push(
-        'The first user message part contains any supplementary input the user provides and extends this program with.'
-      )
+    if (allIns.length > 0) {
+      const inputDefs = allIns.map(fieldToXMLDef).join('\n')
+      systemTask.push(`## Input Definitions\n${inputDefs}`)
     }
 
-    if (ins.length > 0) {
-      const inputDefs = this.sig.getInputFields().map(fieldToXMLDef).join('\n')
-      systemTask.push(
-        `## Input Structure Definitions
-${inputDefs}`
-      )
-    }
-
-    if (ins.length > 0 || (scope && scope.size > 0)) {
+    if (allIns.length > 0) {
       systemTask.push(
         `## Input Referencing Guide
-All of the inputs and their nested properties can be referenced anywhere in this program using xml's xpath dsl. The inline format looks like <xpath ref="//xpath/path/here" />.
-`
+All inputs and their nested properties can be referenced anywhere in this program using XML's XPath language. The inline format looks like <xpath path="//path/to/variable" />.`
       )
     }
 
     if (desc) {
       const text = formatDescription(desc)
-      systemTask.push(
-        `## Main Task Description
-${text}`)
+      systemTask.push(`## Main Task Description\n${text}`)
     }
 
-    // biome-ignore lint/complexity/useFlatMap: you cannot use flatMap here
-    const funcs = this.functions
-      ?.map((f) => ('toFunction' in f ? f.toFunction() : f))
-      ?.flat()
-
-    if (funcs && funcs.length > 0) {
-      const funcList = funcs
+    if (this.functions && this.functions.length > 0) {
+      const funcList = this.functions
         .map((fn) => `- \`${fn.name}\`: ${formatDescription(fn.description)}`)
         .join('\n')
       systemTask.push(`## Available Functions\n${funcList}`)
       systemTask.push(functionCallInstructions.trim())
     }
 
-
-
-    const systemPrompt: AxChatRequestChatPrompt = {
-      role: 'system' as const,
-      content: systemTask.join('\n\n'),
+    const systemInstruction: AxAIGoogleGeminiContent = {
+      role: 'user' as const, // Gemini uses 'user' role for system instructions
+      parts: [{ text: systemTask.join('\n\n') }],
     }
 
-    // User/Assistant History Construction
-    let history: AxChatRequestChatPrompt[] = []
+    // Contents Construction
+    const contents: AxAIGoogleGeminiContent[] = []
+
+    // Demos & Examples
+    contents.push(...this.renderDemosAndExamples(demos, examples))
 
     if (Array.isArray(values)) {
       // Handle AxMessage array history
-      // This part needs to be implemented to render history correctly
-    } else {
-      const userParts: ChatRequestUserMessage = []
-
-      // Demos & Examples
-      const renderedDemos = demos ? this.renderDemos(demos) : []
-      const renderedExamples = examples ? this.renderExamples(examples) : []
-
-      userParts.push(...renderedDemos, ...renderedExamples)
-
-      // User Extended Inputs
-      if (scope && scope.size > 0) {
-        const scopeDefs = []
-        for (const { field } of scope.values()) {
-          scopeDefs.push(fieldToXMLDef(field))
+      for (const message of values) {
+        if (message.role === 'user') {
+          contents.push({
+            role: 'user',
+            parts: this.renderInputValues(message.values),
+          })
+        } else if (message.role === 'assistant') {
+          const assistantParts = this.renderOutputValues(message.values)
+          contents.push({ role: 'model', parts: assistantParts as any }) // Gemini expects 'model' role
         }
-        userParts.push({
-          text:
-            `## Supplementary User Input
-### Definitions
-${scopeDefs.join('\n')}
-### Values
-`})
+      }
+    } else {
+      // This is a single, final input from the user
+      const userParts: AxAIGoogleGeminiContentPart[] = []
 
+      const introPart = { text: '## Inputs\n' }
+
+      // Signature Input Values
+      const inputParts = this.renderInputValues(values)
+
+      // Scope (supplementary) Input Values
+      const scopeParts: AxAIGoogleGeminiContentPart[] = []
+      if (scope && scope.size > 0) {
         for (const { field, value } of scope.values()) {
-          userParts.push(...this.valueToParts(field, value))
+          scopeParts.push(...this.valueToParts(field, value))
         }
       }
 
-      // Input Values
-      userParts.push({ text: '## Input Values' })
-      userParts.push(...this.renderInputValues(values)) // TODO somehow we broke the intermidiate function calling history by assuming an AxGenIn here
+      const allUserParts = [introPart, ...inputParts, ...scopeParts]
 
-      history.push({ role: 'user', content: userParts })
+      userParts.push(...this.mergeConsecutiveTextParts(allUserParts))
+
+      contents.push({ role: 'user', parts: userParts })
     }
 
-    return [systemPrompt, ...history]
+    return {
+      systemInstruction,
+      contents,
+    }
+  }
+
+  private renderDemosAndExamples(
+    demos?: Record<string, AxFieldValue>[],
+    examples?: Record<string, AxFieldValue>[]
+  ): AxAIGoogleGeminiContent[] {
+    const turns: AxAIGoogleGeminiContent[] = []
+    const allExamples = [...(demos ?? []), ...(examples ?? [])]
+
+    if (allExamples.length > 0) {
+      // Acknowledge examples
+      turns.push({
+        role: 'user',
+        parts: [{ text: 'Here are some examples to follow.' }],
+      })
+      turns.push({
+        role: 'model',
+        parts: [
+          { text: 'Okay, I will use these examples as a guide for my responses.' },
+        ],
+      })
+    }
+
+    for (const item of allExamples) {
+      const userContent = this.renderInputValues(item as AxGenIn)
+      const assistantContent = this.renderOutputValues(item as AxGenOut)
+
+      turns.push({ role: 'user', parts: userContent })
+      turns.push({ role: 'model', parts: assistantContent as any })
+    }
+    return turns
+  }
+
+  private renderInputValues = (
+    values: AxGenIn
+  ): AxAIGoogleGeminiContentPart[] => {
+    const allParts = this.sig
+      .getInputFields()
+      .flatMap((field) => this.valueToParts(field, values[field.name]))
+    return this.mergeConsecutiveTextParts(allParts)
+  }
+
+  private renderOutputValues = (
+    values: AxGenOut
+  ): AxAIGoogleGeminiContentPart[] => {
+    const allParts = this.sig
+      .getOutputFields()
+      .flatMap((field) => this.valueToParts(field, values[field.name]))
+    return this.mergeConsecutiveTextParts(allParts)
   }
 
   private valueToParts = (
     field: Readonly<AxField>,
-    value: AxFieldValue,
-  ): ChatRequestUserMessage => {
-    const startTag = { text: `<${field.name}>` }
-    const endTag = { text: `</${field.name}>` }
-
-    switch (field.type) {
-      case 'string':
-      case 'boolean':
-      case 'number':
-      case 'date':
-      case 'datetime':
-      case 'code':
-        // could be an array and it wont matter bc processValue will handle it
-        return [{
-          text:
-            `<${field.name}>
-${processValue(field, value)}
-</${field.name}>`
-        }]
-
-      case 'json':
-      // TODO You must go through the schema and deal with all the nested media parts seperately
-      // essentially the final output will be { text: string } deliminated by { fileData: ... } or { inlineData: ... } but it all still be sandwiched by xml tags
-
-      case 'video':
-      case 'image':
-      case 'audio':
-        let mediaPart: AxAIGoogleGeminiContentPart
-        let mediaValue = value as (AxFileData | AxInlineData)
-        if ('data' in mediaPart) mediaPart = { inlineData: mediaValue as AxInlineData }
-        else mediaPart = { fileData: mediaValue as AxFileData }
-        return [startTag, mediaPart, endTag]
-
-      case 'enum':
-        const mediaTypes = new Set(['video', 'audio', 'image']);
-        if ('enumValueSet' in field && field.enumValueSet.type === 'algebraic' && field.enumValueSet.values.some(v => mediaTypes.has(v))) {
-          // TODO You must go through the schema and deal with all the nested media parts seperately
-          // essentially the final output will be { text: string } deliminated by { fileData: ... } or { inlineData: ... } but it all still be sandwiched by xml tags
-        }
-        return [{
-          text: `<${field.name}>
-${processValue(field, value)}
-</${field.name}`
-        }]
-    }
-  }
-
-  private renderDemos = (data: Readonly<Record<string, AxFieldValue>[]>) =>
-    this.renderExamples(data, true)
-
-  private renderExamples = (
-    data: Readonly<Record<string, AxFieldValue>[]>,
-    isDemo: boolean = false
-  ) => {
-    const chatHistory: ChatRequestUserMessage = []
-    const context = { isExample: true }
-
-    for (const item of data) {
-      // Render user part
-      const userParts: ChatRequestUserMessage = this.sig
-        .getInputFields()
-        .flatMap((field) =>
-          this.renderInField(field, item, { ...context, isInputField: true })
-        )
-
-      // Render assistant part
-      const assistantParts: ChatRequestUserMessage = this.sig
-        .getOutputFields()
-        .flatMap((field) =>
-          this.renderInField(field, item, { ...context, isInputField: false })
-        )
-      // This is a simplification; demos should probably be rendered as full user/assistant turns
-      chatHistory.push(...userParts, ...assistantParts)
-    }
-    return chatHistory
-  }
-
-  private renderInputValues = <T extends AxGenIn>(
-    values: T
-  ): ChatRequestUserMessage => {
-    return this.sig
-      .getInputFields()
-      .flatMap((field) => this.renderInField(field, values, undefined))
-  }
-
-  private renderInField = (
-    field: Readonly<AxField>,
-    values: Readonly<Record<string, AxFieldValue>>,
-    context?: {
-      isExample?: boolean
-      isInputField?: boolean
-    }
-  ): ChatRequestUserMessage => {
-    const value = values[field.name]
-
-    if (isEmptyValue(field, value, context)) {
+    value: AxFieldValue
+  ): AxAIGoogleGeminiContentPart[] => {
+    if (isEmptyValue(field, value)) {
       return []
     }
+    validateValue(field, value)
 
-    if (field.type) {
-      validateValue(field, value!)
+    const parts: AxAIGoogleGeminiContentPart[] = []
+    parts.push({ text: `<${field.name}>` })
+
+    // This new function will handle rendering the value without adding more XML tags,
+    // but it will extract media parts.
+    const renderFieldValue = (val: AxFieldValue): AxAIGoogleGeminiContentPart[] => {
+      // It's a media part
+      if (
+        val &&
+        typeof val === 'object' &&
+        'mimeType' in val &&
+        ('data' in val || 'fileUri' in val)
+      ) {
+        const media = val as AxInlineData | AxFileData
+        return 'data' in media
+          ? [{ inlineData: { mimeType: media.mimeType, data: media.data } }]
+          : [{ fileData: { mimeType: media.mimeType, fileUri: media.fileUri } }]
+      }
+
+      // It's an array of media parts (or other things)
+      if (Array.isArray(val)) {
+        return val.flatMap(renderFieldValue)
+      }
+
+      // For complex objects that might contain media, we need to stringify
+      // them while extracting the media.
+      if (typeof val === 'object' && val !== null) {
+        let tempId = 0
+        const placeholders: Record<string, AxAIGoogleGeminiContentPart[]> = {}
+
+        // Custom replacer for JSON.stringify that replaces media with placeholders
+        const replacer = (key: string, v: any) => {
+          if (
+            v &&
+            typeof v === 'object' &&
+            'mimeType' in v &&
+            ('data' in v || 'fileUri' in v)
+          ) {
+            const placeholder = `__MEDIA_PLACEHOLDER_${tempId++}__`
+            placeholders[placeholder] = renderFieldValue(v)
+            return placeholder
+          }
+          return v
+        }
+
+        const jsonString = JSON.stringify(value, replacer, 2)
+
+        // Split the stringified JSON by placeholders and interleave media
+        const regex = /"__MEDIA_PLACEHOLDER_\d+__"/g
+        const textSegments = jsonString.split(regex)
+        const placeholderMatches = [...jsonString.matchAll(regex)]
+        const resultParts: AxAIGoogleGeminiContentPart[] = []
+
+        if (textSegments[0]) {
+          resultParts.push({ text: textSegments[0] })
+        }
+
+        for (let i = 0; i < placeholderMatches.length; i++) {
+          const placeholderWithQuotes = placeholderMatches[i]?.[0]
+          if (placeholderWithQuotes) {
+            const placeholderKey = placeholderWithQuotes.slice(1, -1) // remove quotes
+            const mediaPart = placeholders[placeholderKey]
+            if (mediaPart) {
+              resultParts.push(...mediaPart)
+            }
+          }
+
+          const nextTextSegment = textSegments[i + 1]
+          if (nextTextSegment) {
+            resultParts.push({ text: nextTextSegment })
+          }
+        }
+        return resultParts
+      }
+
+      // For primitives
+      const processedValue = processValue(field, val)
+      return [{ text: xmlEscape(processedValue as string) }]
     }
 
-    return this.valueToParts(field.name, processedValue, field)
+    parts.push(...renderFieldValue(value))
+    parts.push({ text: `</${field.name}>` })
+
+    return parts
+  }
+
+  private mergeConsecutiveTextParts = (
+    parts: AxAIGoogleGeminiContentPart[]
+  ): AxAIGoogleGeminiContentPart[] => {
+    if (parts.length < 2) {
+      return parts
+    }
+    const merged: AxAIGoogleGeminiContentPart[] = []
+    let lastPart = parts[0]
+    if (lastPart) {
+      merged.push(structuredClone(lastPart))
+    }
+
+    for (let i = 1; i < parts.length; i++) {
+      const currentPart = parts[i]
+      const lastMergedPart = merged[merged.length - 1]
+
+      if (
+        lastMergedPart &&
+        currentPart &&
+        'text' in lastMergedPart &&
+        'text' in currentPart
+      ) {
+        lastMergedPart.text += currentPart.text
+      } else if (currentPart) {
+        merged.push(structuredClone(currentPart))
+      }
+    }
+    return merged
   }
 }
 
@@ -390,16 +373,15 @@ const processValue = (
   if (typeof value === 'string') {
     return value
   }
+  if (value === null || value === undefined) {
+    return ''
+  }
   return JSON.stringify(value, null, 2)
 }
 
 const isEmptyValue = (
   field: Readonly<AxField>,
-  value?: Readonly<AxFieldValue>,
-  context?: {
-    isExample?: boolean
-    isInputField?: boolean
-  }
+  value?: Readonly<AxFieldValue>
 ) => {
   if (typeof value === 'boolean') {
     return false
@@ -410,16 +392,10 @@ const isEmptyValue = (
     value === undefined ||
     ((Array.isArray(value) || typeof value === 'string') && value.length === 0)
   ) {
-    if (context?.isExample) {
-      return true
-    }
-
     if (field.isOptional || field.isInternal) {
       return true
     }
-
-    const fieldType = context?.isInputField !== false ? 'input' : 'output'
-    throw new Error(`Value for ${fieldType} field '${field.name}' is required.`)
+    throw new Error(`Value for required field '${field.name}' is missing.`)
   }
   return false
 }

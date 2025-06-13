@@ -1,5 +1,5 @@
-import { getModelInfo } from '@ax-llm/ax/dsp/modelinfo.js'
-
+import { getModelInfo } from '../../dsp/modelinfo.js'
+import type { AxField, AxSignature, PRIMITIVES } from '../../dsp/sig.js'
 import type { AxAPI } from '../../util/apicall.js'
 import {
   AxBaseAI,
@@ -11,20 +11,18 @@ import type {
   AxAIPromptConfig,
   AxAIServiceImpl,
   AxAIServiceOptions,
+  AxAIInputModelList,
   AxChatResponse,
   AxChatResponseResult,
   AxEmbedResponse,
+  AxFunction,
+  AxFunctionJSONSchema,
   AxInternalChatRequest,
   AxInternalEmbedRequest,
   AxModelConfig,
   AxModelInfo,
+  AxTokenUsage,
 } from '../types.js'
-import type {
-  AxAIInputModelList,
-  AxFunction,
-  AxFunctionJSONSchema,
-} from '../types.js'
-import { type AxField, type AxSignature } from '../../dsp/sig.js'
 
 import { axModelInfoGoogleGemini } from './info.js'
 import {
@@ -105,64 +103,113 @@ export interface AxAIGoogleGeminiArgs {
   modelInfo?: AxModelInfo[]
 }
 
+const toJSONSchemaType = (type: PRIMITIVES) => {
+  switch (type) {
+    case 'string':
+    case 'code':
+    case 'date':
+    case 'datetime':
+    case 'enum':
+      return 'string'
+    case 'number':
+      return 'number'
+    case 'boolean':
+      return 'boolean'
+    case 'json':
+      return 'object'
+    case 'image':
+    case 'audio':
+    case 'video':
+      // Media types aren't directly representable in JSON schema value types,
+      // often handled as strings (URIs/base64) or complex objects.
+      // We'll treat them as string for schema purposes here.
+      return 'string'
+    default:
+      return 'string'
+  }
+}
 const toJSONSchema = (
   fields: readonly AxField[],
   sig?: Readonly<AxSignature>
 ): AxFunctionJSONSchema => {
-  const properties: Record<string, unknown> = {}
+  const properties: Record<string, AxFunctionJSONSchema> = {}
   const required: Array<string> = []
 
   for (const f of fields) {
     if (f.isInternal) {
       continue
     }
-    const type = f.type ? f.type : 'string'
+
+    const fieldSchema: AxFunctionJSONSchema = {
+      description: f.fieldDescription,
+    }
 
     if (f.isArray) {
-      properties[f.name] = {
-        description: f.fieldDescription,
-        type: 'array' as const,
-        items:
-          type === 'json' && 'schema' in f && f.schema
-            ? toJSONSchema(f.schema, sig)
-            : {
-              type: type,
-              description: f.fieldDescription,
-            },
-      }
-    } else if (type === 'json' && 'schema' in f && f.schema) {
-      properties[f.name] = toJSONSchema(f.schema, sig)
-      properties[f.name].description = f.fieldDescription
-    } else if (type === 'enum' && 'enumValueSet' in f) {
-      if (f.enumValueSet.type === 'literal') {
-        properties[f.name] = {
-          description: f.fieldDescription,
-          type: 'string',
-          enum: f.enumValueSet.values,
+      fieldSchema.type = 'array'
+      let items: AxFunctionJSONSchema | undefined
+      if (f.type === 'json' && 'schema' in f && f.schema) {
+        items = toJSONSchema(f.schema)
+      } else if (f.type === 'enum' && 'enumValueSet' in f) {
+        if (f.enumValueSet.type === 'literal') {
+          items = { type: 'string', enum: f.enumValueSet.values }
+        } else {
+          // Algebraic enum
+          items = {
+            oneOf: f.enumValueSet.values.map((v) => ({
+              type: toJSONSchemaType(v),
+            })),
+          }
+        }
+      } else {
+        items = { type: toJSONSchemaType(f.type) }
+        if (f.type === 'datetime') {
+          items.format = 'date-time'
         }
       }
-      // Note: 'algebraic' enum types are not directly supported in JSON Schema enums
-      // and would require more complex schema constructs like anyOf, which are omitted for simplicity.
+      fieldSchema.items = items
+    } else if (f.type === 'json' && 'schema' in f && f.schema) {
+      const nestedSchema = toJSONSchema(f.schema)
+      fieldSchema.type = 'object'
+      fieldSchema.properties = nestedSchema.properties
+      fieldSchema.required = nestedSchema.required
+    } else if (f.type === 'enum' && 'enumValueSet' in f) {
+      if (f.enumValueSet.type === 'literal') {
+        fieldSchema.type = 'string'
+        fieldSchema.enum = f.enumValueSet.values
+      } else {
+        // Algebraic enum: use oneOf
+        const { description } = fieldSchema
+        const oneOfSchema: AxFunctionJSONSchema = {
+          description,
+          oneOf: f.enumValueSet.values.map((v) => ({
+            type: toJSONSchemaType(v),
+            description: `Value of type ${v}`,
+          })),
+        }
+        Object.assign(fieldSchema, oneOfSchema)
+      }
     } else {
-      properties[f.name] = {
-        description: f.fieldDescription,
-        type: type,
+      fieldSchema.type = toJSONSchemaType(f.type)
+      if (f.type === 'datetime') {
+        fieldSchema.format = 'date-time'
       }
     }
+
+    properties[f.name] = fieldSchema
 
     if (!f.isOptional) {
       required.push(f.name)
     }
   }
 
-  const schema = {
+  const schema: AxFunctionJSONSchema = {
     type: 'object',
     properties: properties,
     required: required,
     description: sig?.getDescription(),
   }
 
-  return schema as AxFunctionJSONSchema
+  return schema
 }
 
 class AxAIGoogleGeminiImpl
@@ -219,8 +266,18 @@ class AxAIGoogleGeminiImpl
     const stream = req.modelConfig?.stream ?? this.config.stream
     this.signature = req.signature
 
-    if (!req.chatPrompt || req.chatPrompt.length === 0) {
-      throw new Error('Chat prompt is empty')
+    const reqValue = (
+      Array.isArray(req.chatPrompt) && req.chatPrompt.length === 1
+        ? req.chatPrompt[0]
+        : req.chatPrompt
+    ) as AxAIGoogleGeminiChatRequest
+
+    if (
+      !reqValue ||
+      !('contents' in reqValue) ||
+      reqValue.contents.length === 0
+    ) {
+      throw new Error('Chat prompt is empty or invalid')
     }
 
     let apiConfig
@@ -243,209 +300,40 @@ class AxAIGoogleGeminiImpl
       apiConfig.name += `${pf}key=${this.apiKey}`
     }
 
-    const systemPrompts = req.chatPrompt
-      .filter((p) => p.role === 'system')
-      .map((p) => (p.content as { type: 'text'; text: string }[]).at(0)?.text)
-
-    const systemInstruction =
-      systemPrompts.length > 0
-        ? {
-          role: 'user' as const,
-          parts: [{ text: systemPrompts.join(' ') }],
-        }
-        : undefined
-
-    const contents: AxAIGoogleGeminiChatRequest['contents'] = req.chatPrompt
-      .filter((p) => p.role !== 'system')
-      .map((msg, i) => {
-        switch (msg.role) {
-          case 'user': {
-            const parts: Extract<
-              AxAIGoogleGeminiChatRequest['contents'][0],
-              { role: 'user' }
-            >['parts'] = Array.isArray(msg.content)
-                ? msg.content.map((c, i) => {
-                  switch (c.type) {
-                    case 'text':
-                      return { text: c.text }
-                    case 'image':
-                      return {
-                        inlineData: { mimeType: c.mimeType, data: c.image },
-                      }
-                    case 'file':
-                      return {
-                        fileData: { mimeType: c.mimeType, fileUri: c.fileUri },
-                      }
-                    default:
-                      throw new Error(
-                        `Chat prompt content type not supported (index: ${i})`
-                      )
-                  }
-                })
-                : [{ text: msg.content as string }]
-            return {
-              role: 'user' as const,
-              parts,
-            }
-          }
-
-          case 'assistant': {
-            let parts: Extract<
-              AxAIGoogleGeminiChatRequest['contents'][0],
-              { role: 'model' }
-            >['parts'] = []
-
-            if (msg.functionCalls) {
-              parts = msg.functionCalls.map((f) => {
-                const args =
-                  typeof f.function.params === 'string'
-                    ? JSON.parse(f.function.params)
-                    : f.function.params
-                return {
-                  functionCall: {
-                    name: f.function.name,
-                    args: args,
-                  },
-                }
-              })
-
-              if (!parts) {
-                throw new Error('Function call is empty')
-              }
-
-              return {
-                role: 'model' as const,
-                parts,
-              }
-            }
-
-            if (!msg.content) {
-              throw new Error('Assistant content is empty')
-            }
-
-            parts = [{ text: msg.content as string }]
-            return {
-              role: 'model' as const,
-              parts,
-            }
-          }
-
-          case 'function': {
-            if (!('functionId' in msg)) {
-              throw new Error(`Chat prompt functionId is empty (index: ${i})`)
-            }
-            const parts: Extract<
-              AxAIGoogleGeminiChatRequest['contents'][0],
-              { role: 'function' }
-            >['parts'] = [
-                {
-                  functionResponse: {
-                    name: msg.functionId,
-                    response: { result: msg.result },
-                  },
-                },
-              ]
-
-            return {
-              role: 'function' as const,
-              parts,
-            }
-          }
-
-          default:
-            throw new Error('Invalid role')
-        }
-      })
-
-    let tools: AxAIGoogleGeminiChatRequest['tools'] = []
-    const outputFields = req.signature?.getOutputFields() ?? []
-    const hasOutputFields = outputFields.length > 0
-    const functions = (req.functions ?? []).filter(
-      (fn): fn is AxFunction => 'name' in fn
-    )
-
-    if (hasOutputFields && functions.length > 0) {
-      const finalAnswerTool: AxFunction = {
-        name: 'final_answer',
-        description:
-          'Call this function to return the final answer to the user.',
-        parameters: toJSONSchema(outputFields, req.signature),
-        func: () => {
-          throw new Error('final_answer tool should not be called directly')
-        },
-      }
-      tools.push({ function_declarations: [finalAnswerTool, ...functions] })
-    } else if (functions.length > 0) {
-      tools.push({ function_declarations: functions })
+    // We still need to merge the dynamic/runtime config with the base config
+    const generationConfig: AxAIGoogleGeminiGenerationConfig = {
+      ...(reqValue.generationConfig ?? {}),
+      maxOutputTokens: req.modelConfig?.maxTokens ?? this.config.maxTokens,
+      temperature: req.modelConfig?.temperature ?? this.config.temperature,
+      topP: req.modelConfig?.topP ?? this.config.topP,
+      topK: req.modelConfig?.topK ?? this.config.topK,
+      frequencyPenalty:
+        req.modelConfig?.frequencyPenalty ?? this.config.frequencyPenalty,
+      stopSequences:
+        req.modelConfig?.stopSequences ?? this.config.stopSequences,
     }
 
-    if (this.options?.codeExecution) {
-      tools.push({ code_execution: {} })
+    // Set response schema for structured output if applicable
+    const outputFields = this.signature?.getOutputFields() ?? []
+    const hasVisibleOutput = outputFields.some((f) => !f.isInternal)
+
+    if (hasVisibleOutput) {
+      generationConfig.responseMimeType = 'application/json'
+      generationConfig.responseSchema = toJSONSchema(
+        outputFields,
+        this.signature
+      )
     }
 
-    if (this.options?.googleSearchRetrieval) {
-      tools.push({
-        google_search_retrieval: {
-          dynamic_retrieval_config: this.options.googleSearchRetrieval,
-        },
-      })
+    // Handle thinking budget overrides
+    const thinkingConfig: AxAIGoogleGeminiGenerationConfig['thinkingConfig'] = {
+      ...(generationConfig.thinkingConfig ?? {}),
     }
 
-    if (this.options?.googleSearch) {
-      tools.push({ google_search: {} })
-    }
-
-    if (this.options?.urlContext) {
-      tools.push({ url_context: {} })
-    }
-
-    if (tools.length === 0) {
-      tools = undefined
-    }
-
-    let toolConfig
-
-    if (req.functionCall) {
-      if (req.functionCall === 'none') {
-        toolConfig = { function_calling_config: { mode: 'NONE' as const } }
-      } else if (req.functionCall === 'auto') {
-        toolConfig = { function_calling_config: { mode: 'AUTO' as const } }
-      } else if (req.functionCall === 'required') {
-        toolConfig = {
-          function_calling_config: { mode: 'ANY' as const },
-        }
-      } else {
-        const allowedFunctionNames = req.functionCall.function?.name
-          ? {
-            allowedFunctionNames: [req.functionCall.function.name],
-          }
-          : {}
-        toolConfig = {
-          function_calling_config: { mode: 'ANY' as const },
-          ...allowedFunctionNames,
-        }
-      }
-    } else if (tools && tools.length > 0) {
-      toolConfig = { function_calling_config: { mode: 'AUTO' as const } }
-    }
-
-    const thinkingConfig: AxAIGoogleGeminiGenerationConfig['thinkingConfig'] =
-      {}
-
-    if (this.config.thinking?.includeThoughts) {
-      thinkingConfig.includeThoughts = true
-    }
-
-    if (this.config.thinking?.thinkingTokenBudget) {
-      thinkingConfig.thinkingBudget = this.config.thinking.thinkingTokenBudget
-    }
-
-    // Then, override based on prompt-specific config
     if (config.thinkingTokenBudget) {
-      //The thinkingBudget must be an integer in the range 0 to 24576
       switch (config.thinkingTokenBudget) {
         case 'none':
-          thinkingConfig.thinkingBudget = 0 // Explicitly set to 0
+          thinkingConfig.thinkingBudget = 0
           break
         case 'minimal':
           thinkingConfig.thinkingBudget = 200
@@ -469,40 +357,17 @@ class AxAIGoogleGeminiImpl
       thinkingConfig.includeThoughts = config.showThoughts
     }
 
-    const generationConfig: AxAIGoogleGeminiGenerationConfig = {
-      maxOutputTokens: req.modelConfig?.maxTokens ?? this.config.maxTokens,
-      temperature: req.modelConfig?.temperature ?? this.config.temperature,
-      topP: req.modelConfig?.topP ?? this.config.topP,
-      topK: req.modelConfig?.topK ?? this.config.topK,
-      frequencyPenalty:
-        req.modelConfig?.frequencyPenalty ?? this.config.frequencyPenalty,
-      candidateCount: 1,
-      stopSequences:
-        req.modelConfig?.stopSequences ?? this.config.stopSequences,
-
-      ...(Object.keys(thinkingConfig).length > 0 ? { thinkingConfig } : {}),
+    if (Object.keys(thinkingConfig).length > 0) {
+      generationConfig.thinkingConfig = thinkingConfig
     }
 
-    // Handle structured output
-    if (hasOutputFields && functions.length === 0) {
-      generationConfig.responseMimeType = 'application/json'
-      generationConfig.responseSchema = toJSONSchema(outputFields)
-    } else {
-      generationConfig.responseMimeType = 'text/plain'
-    }
-
-    const safetySettings = this.config.safetySettings
-
-    const reqValue: AxAIGoogleGeminiChatRequest = {
-      contents,
-      tools,
-      toolConfig,
-      systemInstruction,
+    // Final request to be sent
+    const finalReqValue: AxAIGoogleGeminiChatRequest = {
+      ...reqValue,
       generationConfig,
-      safetySettings,
     }
 
-    return [apiConfig, reqValue]
+    return [apiConfig, finalReqValue]
   }
 
   createEmbedReq = (
@@ -568,8 +433,8 @@ class AxAIGoogleGeminiImpl
   createChatResp = (
     resp: Readonly<AxAIGoogleGeminiChatResponse>
   ): AxChatResponse => {
-    const results: AxChatResponseResult[] = resp.candidates?.map(
-      (candidate) => {
+    const results: AxChatResponseResult[] =
+      resp.candidates?.map((candidate) => {
         const result: AxChatResponseResult = {}
 
         switch (candidate.finishReason) {
@@ -601,9 +466,7 @@ class AxAIGoogleGeminiImpl
             ) {
               try {
                 // If the text is valid JSON, we assume it's the structured output
-                const parsed = JSON.parse(
-                  resp.candidates[0].content.parts[0].text
-                )
+                JSON.parse(resp.candidates[0].content.parts[0].text)
                 // Since it's a structured response, the whole text is the content.
                 // It will be parsed later by `extractValues`.
                 result.content = resp.candidates[0].content.parts[0].text
@@ -639,8 +502,7 @@ class AxAIGoogleGeminiImpl
           }
         }
         return result
-      }
-    )
+      }) ?? []
 
     if (resp.usageMetadata) {
       this.tokensUsed = {
@@ -666,13 +528,13 @@ class AxAIGoogleGeminiImpl
   ): AxEmbedResponse => {
     let embeddings: number[][]
     if (this.isVertex) {
-      embeddings = (resp as AxAIGoogleVertexBatchEmbedResponse).predictions.map(
-        (prediction) => prediction.embeddings.values
-      )
+      embeddings = (
+        resp as AxAIGoogleVertexBatchEmbedResponse
+      ).predictions.map((prediction) => prediction.embeddings.values)
     } else {
-      embeddings = (resp as AxAIGoogleGeminiBatchEmbedResponse).embeddings.map(
-        (embedding) => embedding.values
-      )
+      embeddings = (
+        resp as AxAIGoogleGeminiBatchEmbedResponse
+      ).embeddings.map((embedding) => embedding.values)
     }
 
     return {
@@ -746,7 +608,10 @@ export class AxAIGoogleGemini extends AxBaseAI<
       options
     )
 
-    modelInfo = [...axModelInfoGoogleGemini, ...(modelInfo ?? [])]
+    const resolvedModelInfo = [
+      ...axModelInfoGoogleGemini,
+      ...(modelInfo ?? []),
+    ]
 
     const supportFor = (model: AxAIGoogleGeminiModel) => {
       const mi = getModelInfo<
@@ -754,7 +619,7 @@ export class AxAIGoogleGemini extends AxBaseAI<
         AxAIGoogleGeminiEmbedModel
       >({
         model,
-        modelInfo,
+        modelInfo: resolvedModelInfo,
         models,
       })
       return {
@@ -771,7 +636,7 @@ export class AxAIGoogleGemini extends AxBaseAI<
       name: 'GoogleGeminiAI',
       apiURL,
       headers,
-      modelInfo,
+      modelInfo: resolvedModelInfo,
       defaults: {
         model: _config.model as AxAIGoogleGeminiModel,
         embedModel: _config.embedModel as AxAIGoogleGeminiEmbedModel,

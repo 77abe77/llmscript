@@ -2,7 +2,7 @@ import { ColorLog } from '../util/log.js'
 
 import type { AxExample, AxOptimizationStats } from './optimize.js'
 import type { AxProgramUsage } from './program.js'
-import type { AxField } from './sig.js'
+import type { AxField, PRIMITIVES } from './sig.js'
 import type { AxFieldValue, AxGenOut, AxInlineData } from './types.js'
 
 const colorLog = new ColorLog()
@@ -34,12 +34,68 @@ export const validateValue = (
 ): void => {
   const ft = field.type ?? 'string'
 
+  // Handle algebraic enums (discriminated unions) first
+  if (
+    ft === 'enum' &&
+    'enumValueSet' in field &&
+    field.enumValueSet?.type === 'algebraic'
+  ) {
+    const checkItem = (item: AxFieldValue): boolean => {
+      for (const primitiveType of (
+        field.enumValueSet as { type: 'algebraic'; values: PRIMITIVES[] }
+      ).values) {
+        const tempField: AxField = { name: field.name, type: primitiveType }
+        try {
+          validateValue(tempField, item)
+          return true // Validation passed for one of the types
+        } catch (e) {
+          // Continue to the next type
+        }
+      }
+      return false // Did not match any type
+    }
+
+    if (field.isArray) {
+      if (!Array.isArray(value)) {
+        throw new Error(
+          `Validation failed: For field '${field.name}', expected an array but got ${typeof value}`
+        )
+      }
+      for (const item of value) {
+        if (!checkItem(item)) {
+          throw new Error(
+            `Validation failed: Item ${JSON.stringify(item)} in array for field '${field.name}' does not match any of the allowed types: [${(field.enumValueSet.values as string[]).join(', ')}]`
+          )
+        }
+      }
+    } else {
+      if (!checkItem(value)) {
+        throw new Error(
+          `Validation failed: Value for field '${field.name}' does not match any of the allowed types: [${(field.enumValueSet.values as string[]).join(', ')}]`
+        )
+      }
+    }
+    return // Validation successful for algebraic enum
+  }
+
   const validateSingleValue = (
     expectedType: string,
     val: Readonly<AxFieldValue>
   ): boolean => {
     switch (expectedType) {
       case 'enum':
+        // This case now handles only literal enums due to the check at the top of validateValue.
+        if (
+          'enumValueSet' in field &&
+          field.enumValueSet?.type === 'literal'
+        ) {
+          return (
+            typeof val === 'string' &&
+            (field.enumValueSet.values as string[]).includes(val as string)
+          )
+        }
+        // Fallback for misconfigured enums.
+        return typeof val === 'string'
       case 'code':
       case 'string':
         return typeof val === 'string'
