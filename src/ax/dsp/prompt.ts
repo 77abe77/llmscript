@@ -92,7 +92,7 @@ export class AxPromptTemplate {
     const systemTask = []
     const ins = this.sig.getInputFields()
     const scopeIns = scope ? Array.from(scope.values()).map((v) => v.field) : []
-    const allIns = [...ins, ...scopeIns]
+    const allIns = [...scopeIns, ...ins]
 
     const outArgs = renderDescFields(this.sig.getOutputFields())
     const desc = this.sig.getDescription()
@@ -110,7 +110,7 @@ ${allIns.length > 0 ? `You will be provided with the following inputs: ${renderD
     if (allIns.length > 0) {
       systemTask.push(
         `## Input Referencing Guide
-All inputs and their nested properties can be referenced anywhere in this program using XML's XPath language. The inline format looks like <xpath path="//path/to/variable" />.`
+All inputs and their nested properties can be referenced anywhere in this program using XML's XPath language. The inline format looks like <ref xpath="//path/to/variable" />.`
       )
     }
 
@@ -168,7 +168,7 @@ All inputs and their nested properties can be referenced anywhere in this progra
         }
       }
 
-      const allUserParts = [introPart, ...inputParts, ...scopeParts]
+      const allUserParts = [introPart, ...scopeParts, ...inputParts]
 
       userParts.push(...this.mergeConsecutiveTextParts(allUserParts))
 
