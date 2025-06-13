@@ -79,7 +79,7 @@ export async function processStreamingFieldProcessors(
 
     let value = content.substring(xstate.s)
 
-    if (xstate.currField?.type?.name === 'code') {
+    if (xstate.currField?.type === 'code') {
       // remove markdown block
       value = value.replace(/^[ ]*```[a-zA-Z0-9]*\n\s*/, '')
       value = value.replace(/\s*```\s*$/, '')
@@ -125,7 +125,7 @@ function getFieldProcessingMessage(
   field: Readonly<AxField>,
   resultText: string
 ) {
-  const isCodeField = field.type?.name === 'code'
+  const isCodeField = field.type === 'code'
   const fieldTitle = field.title
 
   if (isCodeField) {

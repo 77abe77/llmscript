@@ -8,7 +8,6 @@ import {
 } from '../base.js'
 import { GoogleVertexAuth } from '../google-vertex/auth.js'
 import type {
-  AxAIInputModelList,
   AxAIPromptConfig,
   AxAIServiceImpl,
   AxAIServiceOptions,
@@ -19,8 +18,13 @@ import type {
   AxInternalEmbedRequest,
   AxModelConfig,
   AxModelInfo,
-  AxTokenUsage,
 } from '../types.js'
+import type {
+  AxAIInputModelList,
+  AxFunction,
+  AxFunctionJSONSchema,
+} from '../types.js'
+import { type AxField, type AxSignature } from '../../dsp/sig.js'
 
 import { axModelInfoGoogleGemini } from './info.js'
 import {
@@ -64,8 +68,8 @@ const safetySettings: AxAIGoogleGeminiSafetySettings = [
  */
 export const axAIGoogleGeminiDefaultConfig = (): AxAIGoogleGeminiConfig =>
   structuredClone<AxAIGoogleGeminiConfig>({
-    model: AxAIGoogleGeminiModel.Gemini25Flash,
-    embedModel: AxAIGoogleGeminiEmbedModel.TextEmbedding005,
+    model: AxAIGoogleGeminiModel.Gemini15Flash,
+    embedModel: AxAIGoogleGeminiEmbedModel.TextEmbedding004,
     safetySettings,
     ...axBaseAIDefaultConfig(),
   })
@@ -73,8 +77,8 @@ export const axAIGoogleGeminiDefaultConfig = (): AxAIGoogleGeminiConfig =>
 export const axAIGoogleGeminiDefaultCreativeConfig =
   (): AxAIGoogleGeminiConfig =>
     structuredClone<AxAIGoogleGeminiConfig>({
-      model: AxAIGoogleGeminiModel.Gemini20Flash,
-      embedModel: AxAIGoogleGeminiEmbedModel.TextEmbedding005,
+      model: AxAIGoogleGeminiModel.Gemini15Flash,
+      embedModel: AxAIGoogleGeminiEmbedModel.TextEmbedding004,
       safetySettings,
       ...axBaseAIDefaultCreativeConfig(),
     })
@@ -101,19 +105,79 @@ export interface AxAIGoogleGeminiArgs {
   modelInfo?: AxModelInfo[]
 }
 
+const toJSONSchema = (
+  fields: readonly AxField[],
+  sig?: Readonly<AxSignature>
+): AxFunctionJSONSchema => {
+  const properties: Record<string, unknown> = {}
+  const required: Array<string> = []
+
+  for (const f of fields) {
+    if (f.isInternal) {
+      continue
+    }
+    const type = f.type ? f.type : 'string'
+
+    if (f.isArray) {
+      properties[f.name] = {
+        description: f.fieldDescription,
+        type: 'array' as const,
+        items:
+          type === 'json' && 'schema' in f && f.schema
+            ? toJSONSchema(f.schema, sig)
+            : {
+              type: type,
+              description: f.fieldDescription,
+            },
+      }
+    } else if (type === 'json' && 'schema' in f && f.schema) {
+      properties[f.name] = toJSONSchema(f.schema, sig)
+      properties[f.name].description = f.fieldDescription
+    } else if (type === 'enum' && 'enumValueSet' in f) {
+      if (f.enumValueSet.type === 'literal') {
+        properties[f.name] = {
+          description: f.fieldDescription,
+          type: 'string',
+          enum: f.enumValueSet.values,
+        }
+      }
+      // Note: 'algebraic' enum types are not directly supported in JSON Schema enums
+      // and would require more complex schema constructs like anyOf, which are omitted for simplicity.
+    } else {
+      properties[f.name] = {
+        description: f.fieldDescription,
+        type: type,
+      }
+    }
+
+    if (!f.isOptional) {
+      required.push(f.name)
+    }
+  }
+
+  const schema = {
+    type: 'object',
+    properties: properties,
+    required: required,
+    description: sig?.getDescription(),
+  }
+
+  return schema as AxFunctionJSONSchema
+}
+
 class AxAIGoogleGeminiImpl
   implements
-    AxAIServiceImpl<
-      AxAIGoogleGeminiModel,
-      AxAIGoogleGeminiEmbedModel,
-      AxAIGoogleGeminiChatRequest,
-      AxAIGoogleGeminiBatchEmbedRequest | AxAIGoogleVertexBatchEmbedRequest,
-      AxAIGoogleGeminiChatResponse,
-      AxAIGoogleGeminiChatResponseDelta,
-      AxAIGoogleGeminiBatchEmbedResponse | AxAIGoogleVertexBatchEmbedResponse
-    >
-{
+  AxAIServiceImpl<
+    AxAIGoogleGeminiModel,
+    AxAIGoogleGeminiEmbedModel,
+    AxAIGoogleGeminiChatRequest,
+    AxAIGoogleGeminiBatchEmbedRequest | AxAIGoogleVertexBatchEmbedRequest,
+    AxAIGoogleGeminiChatResponse,
+    AxAIGoogleGeminiChatResponseDelta,
+    AxAIGoogleGeminiBatchEmbedResponse | AxAIGoogleVertexBatchEmbedResponse
+  > {
   private tokensUsed: AxTokenUsage | undefined
+  private signature?: AxSignature
 
   constructor(
     private config: AxAIGoogleGeminiConfig,
@@ -153,6 +217,7 @@ class AxAIGoogleGeminiImpl
   ): [AxAPI, AxAIGoogleGeminiChatRequest] => {
     const model = req.model
     const stream = req.modelConfig?.stream ?? this.config.stream
+    this.signature = req.signature
 
     if (!req.chatPrompt || req.chatPrompt.length === 0) {
       throw new Error('Chat prompt is empty')
@@ -180,14 +245,14 @@ class AxAIGoogleGeminiImpl
 
     const systemPrompts = req.chatPrompt
       .filter((p) => p.role === 'system')
-      .map((p) => p.content)
+      .map((p) => (p.content as { type: 'text'; text: string }[]).at(0)?.text)
 
     const systemInstruction =
       systemPrompts.length > 0
         ? {
-            role: 'user' as const,
-            parts: [{ text: systemPrompts.join(' ') }],
-          }
+          role: 'user' as const,
+          parts: [{ text: systemPrompts.join(' ') }],
+        }
         : undefined
 
     const contents: AxAIGoogleGeminiChatRequest['contents'] = req.chatPrompt
@@ -199,7 +264,7 @@ class AxAIGoogleGeminiImpl
               AxAIGoogleGeminiChatRequest['contents'][0],
               { role: 'user' }
             >['parts'] = Array.isArray(msg.content)
-              ? msg.content.map((c, i) => {
+                ? msg.content.map((c, i) => {
                   switch (c.type) {
                     case 'text':
                       return { text: c.text }
@@ -207,13 +272,17 @@ class AxAIGoogleGeminiImpl
                       return {
                         inlineData: { mimeType: c.mimeType, data: c.image },
                       }
+                    case 'file':
+                      return {
+                        fileData: { mimeType: c.mimeType, fileUri: c.fileUri },
+                      }
                     default:
                       throw new Error(
                         `Chat prompt content type not supported (index: ${i})`
                       )
                   }
                 })
-              : [{ text: msg.content }]
+                : [{ text: msg.content as string }]
             return {
               role: 'user' as const,
               parts,
@@ -254,7 +323,7 @@ class AxAIGoogleGeminiImpl
               throw new Error('Assistant content is empty')
             }
 
-            parts = [{ text: msg.content }]
+            parts = [{ text: msg.content as string }]
             return {
               role: 'model' as const,
               parts,
@@ -269,13 +338,13 @@ class AxAIGoogleGeminiImpl
               AxAIGoogleGeminiChatRequest['contents'][0],
               { role: 'function' }
             >['parts'] = [
-              {
-                functionResponse: {
-                  name: msg.functionId,
-                  response: { result: msg.result },
+                {
+                  functionResponse: {
+                    name: msg.functionId,
+                    response: { result: msg.result },
+                  },
                 },
-              },
-            ]
+              ]
 
             return {
               role: 'function' as const,
@@ -288,10 +357,26 @@ class AxAIGoogleGeminiImpl
         }
       })
 
-    let tools: AxAIGoogleGeminiChatRequest['tools'] | undefined = []
+    let tools: AxAIGoogleGeminiChatRequest['tools'] = []
+    const outputFields = req.signature?.getOutputFields() ?? []
+    const hasOutputFields = outputFields.length > 0
+    const functions = (req.functions ?? []).filter(
+      (fn): fn is AxFunction => 'name' in fn
+    )
 
-    if (req.functions && req.functions.length > 0) {
-      tools.push({ function_declarations: req.functions })
+    if (hasOutputFields && functions.length > 0) {
+      const finalAnswerTool: AxFunction = {
+        name: 'final_answer',
+        description:
+          'Call this function to return the final answer to the user.',
+        parameters: toJSONSchema(outputFields, req.signature),
+        func: () => {
+          throw new Error('final_answer tool should not be called directly')
+        },
+      }
+      tools.push({ function_declarations: [finalAnswerTool, ...functions] })
+    } else if (functions.length > 0) {
+      tools.push({ function_declarations: functions })
     }
 
     if (this.options?.codeExecution) {
@@ -332,8 +417,8 @@ class AxAIGoogleGeminiImpl
       } else {
         const allowedFunctionNames = req.functionCall.function?.name
           ? {
-              allowedFunctionNames: [req.functionCall.function.name],
-            }
+            allowedFunctionNames: [req.functionCall.function.name],
+          }
           : {}
         toolConfig = {
           function_calling_config: { mode: 'ANY' as const },
@@ -394,9 +479,16 @@ class AxAIGoogleGeminiImpl
       candidateCount: 1,
       stopSequences:
         req.modelConfig?.stopSequences ?? this.config.stopSequences,
-      responseMimeType: 'text/plain',
 
       ...(Object.keys(thinkingConfig).length > 0 ? { thinkingConfig } : {}),
+    }
+
+    // Handle structured output
+    if (hasOutputFields && functions.length === 0) {
+      generationConfig.responseMimeType = 'application/json'
+      generationConfig.responseSchema = toJSONSchema(outputFields)
+    } else {
+      generationConfig.responseMimeType = 'text/plain'
     }
 
     const safetySettings = this.config.safetySettings
@@ -416,9 +508,9 @@ class AxAIGoogleGeminiImpl
   createEmbedReq = (
     req: Readonly<AxInternalEmbedRequest<AxAIGoogleGeminiEmbedModel>>
   ): [
-    AxAPI,
-    AxAIGoogleGeminiBatchEmbedRequest | AxAIGoogleVertexBatchEmbedRequest,
-  ] => {
+      AxAPI,
+      AxAIGoogleGeminiBatchEmbedRequest | AxAIGoogleVertexBatchEmbedRequest,
+    ] => {
     const model = req.embedModel
 
     if (!model) {
@@ -501,6 +593,26 @@ class AxAIGoogleGeminiImpl
 
         for (const part of candidate.content.parts) {
           if ('text' in part) {
+            // Check if this is a structured JSON response
+            const outputFields = this.signature?.getOutputFields() ?? []
+            if (
+              outputFields.length > 0 &&
+              resp.candidates[0]?.content.parts[0]?.text
+            ) {
+              try {
+                // If the text is valid JSON, we assume it's the structured output
+                const parsed = JSON.parse(
+                  resp.candidates[0].content.parts[0].text
+                )
+                // Since it's a structured response, the whole text is the content.
+                // It will be parsed later by `extractValues`.
+                result.content = resp.candidates[0].content.parts[0].text
+                break // exit the loop
+              } catch (e) {
+                // Not a JSON response, proceed as normal text
+              }
+            }
+
             if ('thought' in part && part.thought) {
               result.thought = part.text
             } else {
@@ -509,16 +621,21 @@ class AxAIGoogleGeminiImpl
             continue
           }
           if ('functionCall' in part) {
-            result.functionCalls = [
-              {
-                id: part.functionCall.name,
-                type: 'function',
-                function: {
-                  name: part.functionCall.name,
-                  params: part.functionCall.args,
+            // Handle the `final_answer` tool case
+            if (part.functionCall.name === 'final_answer') {
+              result.content = JSON.stringify(part.functionCall.args)
+            } else {
+              result.functionCalls = [
+                {
+                  id: part.functionCall.name,
+                  type: 'function',
+                  function: {
+                    name: part.functionCall.name,
+                    params: part.functionCall.args,
+                  },
                 },
-              },
-            ]
+              ]
+            }
           }
         }
         return result
@@ -643,6 +760,7 @@ export class AxAIGoogleGemini extends AxBaseAI<
       return {
         functions: true,
         streaming: true,
+        json: true,
         hasThinkingBudget: mi?.hasThinkingBudget ?? false,
         hasShowThoughts: mi?.hasShowThoughts ?? false,
         functionCot: false,

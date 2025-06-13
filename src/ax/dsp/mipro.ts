@@ -6,7 +6,11 @@ import {
   type AxMetricFn,
   type AxOptimizerArgs,
 } from './optimize.js'
-import type { AxProgram, AxProgramDemos } from './program.js'
+import type {
+  AxProgram,
+  AxProgramDemos,
+  AxProgramWithSignature,
+} from './program.js'
 import type { AxGenIn, AxGenOut } from './types.js'
 import { updateProgressBar } from './util.js'
 
@@ -703,7 +707,7 @@ export class AxMiPRO<
           0,
           Math.round(
             meanBootstrappedDemos +
-              (Math.random() * 2 - 1) * explorationFactor * 2
+            (Math.random() * 2 - 1) * explorationFactor * 2
           )
         )
       )
@@ -722,7 +726,7 @@ export class AxMiPRO<
           0,
           Math.round(
             meanLabeledExamples +
-              (Math.random() * 2 - 1) * explorationFactor * 2
+            (Math.random() * 2 - 1) * explorationFactor * 2
           )
         )
       )
@@ -777,13 +781,10 @@ export class AxMiPRO<
     program: Readonly<AxProgram<IN, OUT>>,
     instruction: string
   ): void {
-    // This is a simplification - in real use, you need the actual method signature
-    // For demonstration purposes only
-    // Usually would be: program.setInstruction(instruction)
-    const programWithInstruction = program as Readonly<
-      AxProgram<IN, OUT> & { setInstruction: (instr: string) => void }
-    >
-    programWithInstruction.setInstruction?.(instruction)
+    if ('getSignature' in program) {
+      const programWithSig = program as AxProgramWithSignature<IN, OUT>
+      programWithSig.getSignature().setDescription(instruction)
+    }
   }
 
   /**

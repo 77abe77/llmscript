@@ -2,47 +2,53 @@ import { createHash } from 'crypto'
 
 import type { AxFunctionJSONSchema } from '../ai/types.js'
 
-import {
-  type InputParsedField,
-  type OutputParsedField,
-  type ParsedSignature,
-  parseSignature,
-} from './parser.js'
+export type PRIMITIVES =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'json'
+  | 'image'
+  | 'audio'
+  | 'video'
+  | 'date'
+  | 'datetime'
+  | 'enum'
+  | 'code'
 
-export interface AxField {
-  name: string
-  title?: string
-  description?: string
-  type?: {
-    name:
-      | 'string'
-      | 'number'
-      | 'boolean'
-      | 'json'
-      | 'image'
-      | 'audio'
-      | 'date'
-      | 'datetime'
-      | 'class'
-      | 'code'
-    isArray: boolean
-    classes?: string[]
+export type ENUM_SET =
+  | {
+    type: 'literal'
+    values: string[]
   }
+  | {
+    type: 'algebraic'
+    values: PRIMITIVES[]
+  }
+
+interface AxFieldBase<T extends PRIMITIVES> {
+  type: T
+  name: string
+  fieldDescription?: string
+  isArray?: boolean
   isOptional?: boolean
   isInternal?: boolean
 }
 
-export type AxIField = Omit<AxField, 'title'> & { title: string }
+export type AxField<T extends PRIMITIVES = PRIMITIVES> = AxFieldBase<T> &
+  (T extends 'string' ? { canReferenceScope?: boolean } : object) &
+  (T extends 'enum' ? { enumValueSet: ENUM_SET } : object) &
+  (T extends 'json' ? { schema?: AxField<any>[] } : object)
+
 
 export class AxSignature {
   private description?: string
-  private inputFields: AxIField[]
-  private outputFields: AxIField[]
+  private inputFields: AxField[]
+  private outputFields: AxField[]
 
   private sigHash: string
   private sigString: string
 
-  constructor(signature?: Readonly<AxSignature | string>) {
+  constructor(signature?: Readonly<AxSignature>) {
     if (!signature) {
       this.inputFields = []
       this.outputFields = []
@@ -51,27 +57,14 @@ export class AxSignature {
       return
     }
 
-    if (typeof signature === 'string') {
-      let sig: ParsedSignature
-      try {
-        sig = parseSignature(signature)
-      } catch (e) {
-        throw new Error(
-          `Invalid Signature: ${(e as Error).message} (${signature})`
-        )
-      }
-      this.description = sig.desc
-      this.inputFields = sig.inputs.map((v) => this.parseParsedField(v))
-      this.outputFields = sig.outputs.map((v) => this.parseParsedField(v))
-      ;[this.sigHash, this.sigString] = this.updateHash()
-    } else if (signature instanceof AxSignature) {
+    if (signature instanceof AxSignature) {
       this.description = signature.getDescription()
       this.inputFields = structuredClone(
         signature.getInputFields()
-      ) as AxIField[]
+      ) as AxField[]
       this.outputFields = structuredClone(
         signature.getOutputFields()
-      ) as AxIField[]
+      ) as AxField[]
       this.sigHash = signature.hash()
       this.sigString = signature.toString()
     } else {
@@ -79,90 +72,59 @@ export class AxSignature {
     }
   }
 
-  private parseParsedField = (
-    field: Readonly<InputParsedField | OutputParsedField>
-  ): AxIField => {
-    if (!field.name || field.name.length === 0) {
-      throw new Error('Field name is required.')
-    }
-
-    const title = this.toTitle(field.name)
-    return {
-      name: field.name,
-      title,
-      description: 'desc' in field ? field.desc : undefined,
-      type: field.type ?? { name: 'string', isArray: false },
-      ...('isInternal' in field ? { isInternal: field.isInternal } : {}),
-      ...('isOptional' in field ? { isOptional: field.isOptional } : {}),
-    }
-  }
-
-  private parseField = (field: Readonly<AxField>): AxIField => {
-    const title =
-      !field.title || field.title.length === 0
-        ? this.toTitle(field.name)
-        : field.title
-
-    if (field.type && (!field.type.name || field.type.name.length === 0)) {
-      throw new Error('Field type name is required: ' + field.name)
-    }
-
-    return { ...field, title }
-  }
-
   public setDescription = (desc: string) => {
     this.description = desc
     this.updateHash()
   }
 
-  public addInputField = (field: Readonly<AxField>) => {
-    this.inputFields.push(this.parseField(field))
+  public addInputField = (field: Readonly<AxField<any>>) => {
+    this.inputFields.push(field)
     this.updateHash()
   }
 
-  public addOutputField = (field: Readonly<AxField>) => {
-    this.outputFields.push(this.parseField(field))
+  public addOutputField = (field: Readonly<AxField<any>>) => {
+    this.outputFields.push(field)
     this.updateHash()
   }
 
-  public setInputFields = (fields: readonly AxField[]) => {
-    this.inputFields = fields.map((v) => this.parseField(v))
+  public setInputFields = (fields: AxField<any>[]) => {
+    this.inputFields = fields
     this.updateHash()
   }
 
-  public setOutputFields = (fields: readonly AxField[]) => {
-    this.outputFields = fields.map((v) => this.parseField(v))
+  public setOutputFields = (fields: AxField<any>[]) => {
+    this.outputFields = fields
     this.updateHash()
   }
 
-  public getInputFields = (): Readonly<AxIField[]> => this.inputFields
-  public getOutputFields = (): Readonly<AxIField[]> => this.outputFields
+  public getInputFields = (): Readonly<AxField[]> => this.inputFields
+  public getOutputFields = (): Readonly<AxField[]> => this.outputFields
   public getDescription = () => this.description
-
-  private toTitle = (name: string) => {
-    let result = name.replace(/_/g, ' ')
-    result = result.replace(/([A-Z]|[0-9]+)/g, ' $1').trim()
-    return result.charAt(0).toUpperCase() + result.slice(1)
-  }
 
   public toJSONSchema = (): AxFunctionJSONSchema => {
     const properties: Record<string, unknown> = {}
     const required: Array<string> = []
 
     for (const f of this.inputFields) {
-      const type = f.type ? f.type.name : 'string'
-      if (f.type?.isArray) {
+      const type = f.type ? f.type : 'string'
+      if (f.isArray) {
         properties[f.name] = {
-          description: f.description,
+          description: f.fieldDescription,
           type: 'array' as const,
-          items: {
-            type: type,
-            description: f.description,
-          },
+          items:
+            type === 'json' && 'schema' in f && f.schema
+              ? this.nestedToJSONSchema(f.schema)
+              : {
+                type: type,
+                description: f.fieldDescription,
+              },
         }
+      } else if (type === 'json' && 'schema' in f && f.schema) {
+        properties[f.name] = this.nestedToJSONSchema(f.schema)
+        properties[f.name].description = f.fieldDescription
       } else {
         properties[f.name] = {
-          description: f.description,
+          description: f.fieldDescription,
           type: type,
         }
       }
@@ -181,13 +143,45 @@ export class AxSignature {
     return schema as AxFunctionJSONSchema
   }
 
+  private nestedToJSONSchema(fields: readonly AxField<any>[]) {
+    const properties: Record<string, unknown> = {}
+    const required: Array<string> = []
+
+    for (const f of fields) {
+      const type = f.type ? f.type : 'string'
+      if (f.isArray) {
+        properties[f.name] = {
+          description: f.fieldDescription,
+          type: 'array' as const,
+          items:
+            type === 'json' && 'schema' in f && f.schema
+              ? this.nestedToJSONSchema(f.schema)
+              : { type },
+        }
+      } else if (type === 'json' && 'schema' in f && f.schema) {
+        properties[f.name] = this.nestedToJSONSchema(f.schema)
+      } else {
+        properties[f.name] = {
+          description: f.fieldDescription,
+          type,
+        }
+      }
+
+      if (!f.isOptional) {
+        required.push(f.name)
+      }
+    }
+
+    return { type: 'object', properties, required }
+  }
+
   private updateHash = (): [string, string] => {
     this.getInputFields().forEach((field) => {
       validateField(field)
     })
     this.getOutputFields().forEach((field) => {
       validateField(field)
-      if (field.type?.name === 'image') {
+      if (field.type === 'image') {
         throw new Error('Image type is not supported in output fields.')
       }
     })
@@ -227,14 +221,14 @@ function renderField(field: Readonly<AxField>): string {
     result += '?'
   }
   if (field.type) {
-    result += ':' + field.type.name
-    if (field.type.isArray) {
+    result += ':' + field.type
+    if (field.isArray) {
       result += '[]'
     }
   }
   // Check if description exists and append it.
-  if (field.description) {
-    result += ` "${field.description}"`
+  if (field.fieldDescription) {
+    result += ` "${field.fieldDescription}"`
   }
   return result
 }
@@ -290,6 +284,10 @@ function validateField(field: Readonly<AxField>): void {
       'time',
       'type',
       'class',
+      'video',
+      'audio',
+      'enum',
+      'code',
     ].includes(field.name)
   ) {
     throw new Error(

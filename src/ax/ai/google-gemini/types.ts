@@ -1,22 +1,13 @@
-import type { AxModelConfig } from '../types.js'
+import type { AxMediaMimeType } from '../../dsp/types.js'
+import type { AxFunction, AxModelConfig } from '../types.js'
 
 export enum AxAIGoogleGeminiModel {
-  Gemini25Pro = 'gemini-2.5-pro-preview-05-06',
-  Gemini25Flash = 'gemini-2.5-flash-preview-04-17',
-  Gemini20Flash = 'gemini-2.0-flash',
-  Gemini20FlashLite = 'gemini-2.0-flash-lite-preview-02-05',
-  Gemini1Pro = 'gemini-1.0-pro',
-  Gemini15Flash = 'gemini-1.5-flash',
-  Gemini15Flash002 = 'gemini-1.5-flash-002',
-  Gemini15Flash8B = 'gemini-1.5-flash-8b',
-  Gemini15Pro = 'gemini-1.5-pro',
+  Gemini15Pro = 'gemini-1.5-pro-preview-0409',
+  Gemini15Flash = 'gemini-1.5-flash-preview-0514',
 }
 
 export enum AxAIGoogleGeminiEmbedModel {
-  GeminiEmbedding = 'gemini-embedding-exp-03-07',
-  TextEmbeddingLarge = 'text-embedding-large-exp-03-07',
   TextEmbedding004 = 'text-embedding-004',
-  TextEmbedding005 = 'text-embedding-005',
 }
 
 export enum AxAIGoogleGeminiSafetyCategory {
@@ -45,56 +36,53 @@ export enum AxAIGoogleGeminiEmbedTypes {
   CodeRetrievalQuery = 'CODE_RETRIEVAL_QUERY',
 }
 
+export type AxAIGoogleGeminiContentPart =
+  | {
+    text: string
+    thought?: string
+  }
+  | {
+    inlineData: {
+      mimeType: AxMediaMimeType
+      data: string
+    }
+  }
+  | {
+    fileData: {
+      mimeType: AxMediaMimeType
+      fileUri: string
+    }
+  }
+
 export type AxAIGoogleGeminiContent =
   | {
-      role: 'user'
-      parts: (
-        | {
-            text: string
-            thought?: string
-          }
-        | {
-            inlineData: {
-              mimeType: string
-              data: string
-            }
-          }
-        | {
-            fileData: {
-              mimeType: string
-              fileUri: string
-            }
-          }
-      )[]
-    }
+    role: 'user'
+    parts: AxAIGoogleGeminiContentPart[]
+  }
   | {
-      role: 'model'
-      parts:
-        | {
-            text: string
-          }[]
-        | {
-            functionCall: {
-              name: string
-              args: object
-            }
-          }[]
-    }
+    role: 'model'
+    parts:
+    | {
+      text: string
+    }[]
+    | {
+      functionCall: {
+        name: string
+        args: object
+      }
+    }[]
+  }
   | {
-      role: 'function'
-      parts: {
-        functionResponse: {
-          name: string
-          response: object
-        }
-      }[]
-    }
+    role: 'function'
+    parts: {
+      functionResponse: {
+        name: string
+        response: object
+      }
+    }[]
+  }
 
-export type AxAIGoogleGeminiToolFunctionDeclaration = {
-  name: string
-  description?: string
-  parameters?: object
-}
+export type AxAIGoogleGeminiToolFunctionDeclaration = AxFunction
 
 export type AxAIGoogleGeminiToolGoogleSearchRetrieval = {
   dynamic_retrieval_config: {
@@ -126,7 +114,8 @@ export type AxAIGoogleGeminiGenerationConfig = {
   candidateCount?: number
   maxOutputTokens?: number
   stopSequences?: readonly string[]
-  responseMimeType?: string
+  responseMimeType?: 'text/plain' | 'application/json'
+  responseSchema?: object
   thinkingConfig?: {
     thinkingBudget?: number
     includeThoughts?: boolean
@@ -152,12 +141,12 @@ export type AxAIGoogleGeminiChatResponse = {
     content: AxAIGoogleGeminiContent
 
     finishReason:
-      | 'STOP'
-      | 'MAX_TOKENS'
-      | 'SAFETY'
-      | 'RECITATION'
-      | 'OTHER'
-      | 'MALFORMED_FUNCTION_CALL'
+    | 'STOP'
+    | 'MAX_TOKENS'
+    | 'SAFETY'
+    | 'RECITATION'
+    | 'OTHER'
+    | 'MALFORMED_FUNCTION_CALL'
     citationMetadata: {
       citations: {
         startIndex: number

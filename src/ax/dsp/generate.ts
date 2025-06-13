@@ -117,8 +117,8 @@ export interface AxStreamingEvent<T> {
 
 export class AxGen<
   IN extends AxGenInType | ReadonlyArray<AxMessage> =
-    | AxGenInType
-    | ReadonlyArray<AxMessage>,
+  | AxGenInType
+  | ReadonlyArray<AxMessage>,
   OUT extends AxGenerateResult<AxGenOutType> = AxGenerateResult<AxGenOutType>,
 > extends AxProgramWithSignature<IN, OUT> {
   private promptTemplate: AxPromptTemplate
@@ -135,7 +135,7 @@ export class AxGen<
   private logger?: AxLoggerFunction
 
   constructor(
-    signature: Readonly<AxSignature | string>,
+    signature: Readonly<AxSignature>,
     options?: Readonly<AxGenOptions>
   ) {
     super(signature, { description: options?.description })
@@ -187,7 +187,7 @@ export class AxGen<
     }
 
     if (streaming) {
-      const ft = field.type?.name
+      const ft = field.type
       const isText = !ft || ft === 'string' || ft === 'code'
 
       if (!isText) {
@@ -268,6 +268,7 @@ export class AxGen<
         functionCall,
         modelConfig,
         model,
+        signature: this.signature,
       },
       {
         sessionId,
@@ -565,7 +566,12 @@ export class AxGen<
           this.values[this.thoughtFieldName] = result.thought
         }
 
-        extractValues(this.signature, this.values, result.content)
+        try {
+          const parsed = JSON.parse(result.content)
+          this.values = { ...this.values, ...parsed }
+        } catch (e) {
+          extractValues(this.signature, this.values, result.content)
+        }
         await assertAssertions(this.asserts, this.values)
 
         if (this.fieldProcessors.length) {
@@ -640,6 +646,7 @@ export class AxGen<
       prompt = this.promptTemplate.render(values, {
         examples: this.examples,
         demos: this.demos,
+        scope: this.getScope(),
       })
     } else {
       // Ensure `values` here is correctly inferred as AxGenInType
@@ -647,6 +654,7 @@ export class AxGen<
         // Cast if necessary
         examples: this.examples,
         demos: this.demos,
+        scope: this.getScope(),
       })
     }
 

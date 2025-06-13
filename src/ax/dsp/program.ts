@@ -12,7 +12,7 @@ import type { AxAIMemory } from '../mem/types.js'
 
 import type { AxInputFunctionType } from './functions.js'
 import { AxInstanceRegistry } from './registry.js'
-import { AxSignature } from './sig.js'
+import { type AxField, AxSignature } from './sig.js'
 import type { AxFieldValue, AxGenIn, AxGenOut, AxMessage } from './types.js'
 import { mergeProgramUsage, validateValue } from './util.js'
 
@@ -49,12 +49,12 @@ export type AxProgramForwardOptions = {
   debug?: boolean
   debugHideSystemPrompt?: boolean
   thinkingTokenBudget?:
-    | 'minimal'
-    | 'low'
-    | 'medium'
-    | 'high'
-    | 'highest'
-    | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'highest'
+  | 'none'
   showThoughts?: boolean
   traceLabel?: string
   abortSignal?: AbortSignal
@@ -109,11 +109,10 @@ export interface AxProgramWithSignatureOptions {
 }
 
 export class AxProgramWithSignature<
-    IN extends AxGenIn | ReadonlyArray<AxMessage>,
-    OUT extends AxGenOut,
-  >
-  implements AxTunable, AxUsable
-{
+  IN extends AxGenIn | ReadonlyArray<AxMessage>,
+  OUT extends AxGenOut,
+>
+  implements AxTunable, AxUsable {
   protected signature: AxSignature
   protected sigHash: string
 
@@ -122,12 +121,14 @@ export class AxProgramWithSignature<
   protected demos?: Record<string, AxFieldValue>[]
   protected trace?: Record<string, AxFieldValue>
   protected usage: AxProgramUsage[] = []
+  protected scope: Map<string, { field: AxField<any>; value: AxFieldValue }> =
+    new Map()
 
   private key: { id: string; custom?: boolean }
   private children: AxInstanceRegistry<Readonly<AxTunable & AxUsable>>
 
   constructor(
-    signature: Readonly<AxSignature | string>,
+    signature: Readonly<AxSignature>,
     options?: Readonly<AxProgramWithSignatureOptions>
   ) {
     this.signature = new AxSignature(signature)
@@ -142,6 +143,20 @@ export class AxProgramWithSignature<
 
   public getSignature() {
     return this.signature
+  }
+
+  public updateScope(field: AxField<any>, value?: AxFieldValue) {
+    if (value === null || value === undefined) {
+      this.scope.delete(field.name)
+    } else {
+      this.scope.set(field.name, { field, value })
+    }
+  }
+
+  public getScope(): Readonly<
+    Map<string, { field: AxField<any>; value: AxFieldValue }>
+  > {
+    return this.scope
   }
 
   public register(prog: Readonly<AxTunable & AxUsable>) {
@@ -282,8 +297,7 @@ export class AxProgramWithSignature<
 }
 
 export class AxProgram<IN extends AxGenIn, OUT extends AxGenOut>
-  implements AxTunable, AxUsable
-{
+  implements AxTunable, AxUsable {
   protected trace?: Record<string, AxFieldValue>
   protected usage: AxProgramUsage[] = []
 

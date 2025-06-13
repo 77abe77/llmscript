@@ -3,7 +3,7 @@ import { ColorLog } from '../util/log.js'
 import type { AxExample, AxOptimizationStats } from './optimize.js'
 import type { AxProgramUsage } from './program.js'
 import type { AxField } from './sig.js'
-import type { AxFieldValue, AxGenOut } from './types.js'
+import type { AxFieldValue, AxGenOut, AxInlineData } from './types.js'
 
 const colorLog = new ColorLog()
 
@@ -32,17 +32,15 @@ export const validateValue = (
   field: Readonly<AxField>,
   value: Readonly<AxFieldValue>
 ): void => {
-  const ft = field.type ?? { name: 'string', isArray: false }
+  const ft = field.type ?? 'string'
 
   const validateSingleValue = (
     expectedType: string,
     val: Readonly<AxFieldValue>
   ): boolean => {
     switch (expectedType) {
-      case 'class':
-        return typeof val === 'string'
+      case 'enum':
       case 'code':
-        return typeof val === 'string'
       case 'string':
         return typeof val === 'string'
       case 'number':
@@ -50,7 +48,6 @@ export const validateValue = (
       case 'boolean':
         return typeof val === 'boolean'
       case 'date':
-        return val instanceof Date || typeof val === 'string'
       case 'datetime':
         return val instanceof Date || typeof val === 'string'
       case 'json':
@@ -60,62 +57,42 @@ export const validateValue = (
     }
   }
 
-  const validImage = (val: Readonly<AxFieldValue>): boolean => {
+  const validMedia = (val: Readonly<AxFieldValue>): boolean => {
     if (
       !val ||
       typeof val !== 'object' ||
       !('mimeType' in val) ||
-      !('data' in val)
+      (!('data' in val) && !('fileUri' in val))
     ) {
       return false
     }
     return true
   }
 
-  if (field.type?.name === 'image') {
+  if (
+    field.type === 'image' ||
+    field.type === 'video' ||
+    field.type === 'audio'
+  ) {
     let msg: string | undefined
+    const expected = `object ({ mimeType: string; data: string | fileUri: string })`
     if (Array.isArray(value)) {
+      if (!field.isArray) {
+        msg = `Expected a single media object, but got an array.`
+      }
       for (const item of value) {
-        if (!validImage(item)) {
-          msg = 'object ({ mimeType: string; data: string })'
+        if (!validMedia(item)) {
+          msg = `Expected an array of ${expected}`
           break
         }
       }
-    } else if (!validImage(value)) {
-      msg = 'object ({ mimeType: string; data: string })'
+    } else if (!validMedia(value)) {
+      msg = `Expected ${expected}`
     }
 
     if (msg) {
       throw new Error(
-        `Validation failed: Expected '${field.name}' to be type '${msg}' instead got '${value}'`
-      )
-    }
-    return
-  }
-
-  const validAudio = (val: Readonly<AxFieldValue>): boolean => {
-    if (!val || typeof val !== 'object' || !('data' in val)) {
-      return false
-    }
-    return true
-  }
-
-  if (field.type?.name === 'audio') {
-    let msg: string | undefined
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (!validAudio(item)) {
-          msg = 'object ({ data: string; format?: string })'
-          break
-        }
-      }
-    } else if (!validAudio(value)) {
-      msg = 'object ({ data: string; format?: string })'
-    }
-
-    if (msg) {
-      throw new Error(
-        `Validation failed: Expected '${field.name}' to be type '${msg}' instead got '${value}'`
+        `Validation failed: For field '${field.name}', ${msg} but got '${JSON.stringify(value)}'`
       )
     }
     return
@@ -123,25 +100,25 @@ export const validateValue = (
 
   let isValid = true
 
-  if (ft.isArray) {
+  if (field.isArray) {
     if (!Array.isArray(value)) {
       isValid = false
     } else {
       for (const item of value) {
-        if (!validateSingleValue(ft.name, item)) {
+        if (!validateSingleValue(ft, item)) {
           isValid = false
           break
         }
       }
     }
   } else {
-    isValid = validateSingleValue(ft.name, value)
+    isValid = validateSingleValue(ft, value)
   }
 
   if (!isValid) {
     const gotType = Array.isArray(value) ? 'array' : typeof value
     throw new Error(
-      `Validation failed: Expected '${field.name}' to be a ${field.type?.isArray ? 'an array of ' : ''}${ft.name} instead got '${gotType}' (${JSON.stringify(value)})`
+      `Validation failed: Expected '${field.name}' to be a ${field.isArray ? 'an array of ' : ''}${ft} instead got '${gotType}' (${JSON.stringify(value)})`
     )
   }
 }

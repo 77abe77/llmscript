@@ -24,15 +24,39 @@ export class AxRAG extends AxChainOfThought<
     queryFn: (query: string) => Promise<string>,
     options: Readonly<AxGenOptions & { maxHops?: number }>
   ) {
-    const sig =
-      '"Answer questions with short factoid answers." context:string[] "may contain relevant facts", question -> answer'
+    const sig = new AxSignature()
+    sig.setDescription('Answer questions with short factoid answers.')
+    sig.addInputField({
+      name: 'context',
+      type: 'string',
+      isArray: true,
+      fieldDescription: 'may contain relevant facts',
+    })
+    sig.addInputField({ name: 'question', type: 'string' })
+    sig.addOutputField({ name: 'answer', type: 'string' })
+
     super(sig, options)
 
     this.maxHops = options?.maxHops ?? 3
 
-    const qsig = new AxSignature(
-      '"Write a simple search query that will help answer a complex question." context?:string[] "may contain relevant facts", question -> query "question to further our understanding"'
+    const qsig = new AxSignature()
+    qsig.setDescription(
+      'Write a simple search query that will help answer a complex question.'
     )
+    qsig.addInputField({
+      name: 'context',
+      type: 'string',
+      isArray: true,
+      isOptional: true,
+      fieldDescription: 'may contain relevant facts',
+    })
+    qsig.addInputField({ name: 'question', type: 'string' })
+    qsig.addOutputField({
+      name: 'query',
+      type: 'string',
+      fieldDescription: 'question to further our understanding',
+    })
+
     this.genQuery = new AxGen<
       { context: string[]; question: string },
       { query: string }

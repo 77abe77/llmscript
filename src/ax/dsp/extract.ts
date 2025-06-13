@@ -131,6 +131,23 @@ export const streamingExtractFinalValue = (
   if (xstate.currField) {
     let val = content.substring(xstate.s).trim()
 
+    // Handle structured JSON output
+    if (xstate.currField.type === 'json') {
+      try {
+        const parsed = JSON.parse(content)
+        for (const key of Object.keys(parsed)) {
+          if (key in values) {
+            // value already extracted via streaming, do nothing
+          } else {
+            values[key] = parsed[key]
+          }
+        }
+        return
+      } catch (e) {
+        // Not a JSON object, treat as a normal field
+      }
+    }
+
     const parsedValue = validateAndParseFieldValue(xstate.currField, val)
     if (parsedValue !== undefined) {
       values[xstate.currField.name] = parsedValue
@@ -147,7 +164,7 @@ const convertValueToType = (
   val: string,
   required: boolean = false
 ) => {
-  switch (field.type?.name) {
+  switch (field.type) {
     case 'code':
       return extractBlock(val)
 
@@ -187,14 +204,20 @@ const convertValueToType = (
     case 'datetime':
       return parseLLMFriendlyDateTime(field, val, required)
 
-    case 'class':
+    case 'enum':
       const className = val
-      if (field.type.classes && !field.type.classes.includes(className)) {
+      if (
+        'enumValueSet' in field &&
+        field.enumValueSet.type === 'literal' &&
+        !field.enumValueSet.values.includes(className)
+      ) {
         if (field.isOptional) {
           return
         }
         throw new Error(
-          `Invalid class '${val}', expected one of the following: ${field.type.classes.join(', ')}`
+          `Invalid class '${val}', expected one of the following: ${field.enumValueSet.values.join(
+            ', '
+          )}`
         )
       }
       return className as string
@@ -213,7 +236,7 @@ export function* yieldDelta<OUT>(
   xstate: extractionState
 ) {
   const { name: fieldName, isInternal } = field
-  const { isArray: fieldIsArray, name: fieldTypeName } = field.type ?? {}
+  const { isArray: fieldIsArray, type: fieldTypeName } = field
 
   if (
     isInternal ||
@@ -235,14 +258,14 @@ export function* yieldDelta<OUT>(
   let d2 = d1.replace(/\s+$/, '')
 
   // If this field is a "code" type, remove trailing backticks
-  if (xstate.currField?.type?.name === 'code') {
+  if (xstate.currField?.type === 'code') {
     d2 = d2.replace(/\s*```\s*$/, '')
   }
 
   // Only trim start for the first chunk
   let d3 = isFirstChunk ? d2.trimStart() : d2
 
-  if (xstate.currField?.type?.name === 'code') {
+  if (xstate.currField?.type === 'code') {
     // Remove any leading triple-backtick fences (with optional language specifier)
     d3 = d3.replace(/^[ ]*```[a-zA-Z0-9]*\n\s*/, '')
   }
@@ -334,7 +357,7 @@ function validateAndParseFieldValue(
 
   let value: unknown | undefined
 
-  if (field.type?.name === 'json') {
+  if (field.type === 'json') {
     try {
       const text = extractBlock(fieldValue)
       value = JSON.parse(text)
@@ -348,7 +371,7 @@ function validateAndParseFieldValue(
     }
   }
 
-  if (field.type?.isArray) {
+  if (field.isArray) {
     try {
       try {
         value = JSON.parse(fieldValue)
