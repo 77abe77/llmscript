@@ -1,22 +1,5 @@
 {
-  "$schema": "https://typedoc.org/schema.json",
-  "plugin": [
-    "typedoc-plugin-markdown",
-    "typedoc-plugin-frontmatter",
-    "./customFrontmatter.mjs"
-  ],
-  "pretty": true,
-  "cleanOutputDir": true,
-  "hidePageTitle": true,
-  "hideGroupHeadings": true,
-  "parametersFormat": "table",
-  "typeDeclarationVisibility": "compact",
-  "hidePageHeader": true,
-  "hideBreadcrumbs": true,
-  "useHTMLAnchors": true,
-  "preserveAnchorCasing": true,
-  "excludePrivate": true,
-  "excludeProtected": true,
-  "flattenOutputFiles": true,
-  "mergeReadme": false
+  "extends": ["../../typedoc.json"],
+  "entryPoints": ["./index.ts"],
+  "out": "../docs/src/content/docs/03-apidocs"
 }

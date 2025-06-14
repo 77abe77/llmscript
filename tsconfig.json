@@ -1,15 +1,3 @@
 {
-  "extends": "@total-typescript/tsconfig/tsc/no-dom/library",
-  "compilerOptions": {
-    "jsx": "react",
-    "esModuleInterop": true,
-    "moduleResolution": "NodeNext",
-    "outDir": "build/module",
-    "pretty": true,
-    "baseUrl": ".",
-    "paths": {
-      "@ax-llm/*": ["src/*"]
-    }
-  },
-  "exclude": ["node_modules/**", "dist/**", "src/*/dist/**"]
+  "extends": ["../../tsconfig.json"]
 }
