@@ -13,23 +13,17 @@
   "license": "Apache-2.0",
   "keywords": [],
   "scripts": {
-    "dev": "tsup --watch",
-    "build": "npm run build:index && tsup",
-    "build:index": "node --import=tsx ../../scripts/generateIndex.ts",
+    "prepare": "bun run build",
+    "dev": "bun --watch index.ts",
+    "build": "bun build ./index.ts --outdir ./dist --target node --format esm",
     "clean": "rm -rf dist",
-    "test": "run-s test:*",
+    "test": "bun run test:type-check && bun run test:unit",
     "test:type-check": "tsc --noEmit",
-    "test:unit": "vitest run",
-    "test:lint": "eslint .",
+    "test:unit": "bun test",
     "test:format": "prettier --check \"**/*.{ts,json,md}\"",
-    "fix": "run-s fix:*",
-    "fix:lint": "eslint --fix",
+    "fix": "bun run fix:format",
     "fix:format": "prettier --write \"**/*.{ts,json,md}\"",
-    "doc:build:markdown": "typedoc --readme none",
-    "tsx": "node --env-file=.env --import=tsx",
-    "release": "release-it",
-    "publish": "npm run build && cd dist && npm publish",
-    "postbuild": "node ../../scripts/postbuild.js"
+    "publish": "bun run build && cd dist && bun publish"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
@@ -47,10 +41,7 @@
   "devDependencies": {
     "@total-typescript/tsconfig": "^1.0.4",
     "@types/node": "^22.13.10",
-    "@typescript-eslint/eslint-plugin": "^8.26.1",
-    "@typescript-eslint/parser": "^8.26.1",
     "@types/uuid": "^10.0.0",
-    "tsup": "^8.5.0",
-    "tsx": "^4.19.4"
+    "prettier": "^3.3.3"
   }
 }

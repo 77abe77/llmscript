@@ -1,0 +1,4 @@
+[build]
+# This tells Bun's builder to always target a Node.js environment,
+# which allows it to correctly handle built-in Node modules.
+target = "node"

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S npx tsx
+#!/usr/bin/env bun
 
 /**
  * This script is designed to test the programmatic creation of signatures
@@ -6,13 +6,17 @@
  * to the Google Gemini API.
  *
  * It uses a mock `fetch` function to intercept the API call, so no real
- * requests are sent.
+ * requests are sent. It also demonstrates the use of the `@ax-llm/ax` path alias.
  */
 
-import { AxAIGoogleGemini, AxGen, AxSignature } from './index.js'
-import type { AxAIGoogleGeminiChatRequest } from './ai/google-gemini/types.js'
-import type { AxField } from './dsp/sig.js'
-import type { AxFieldValue } from './dsp/types.js'
+import {
+    AxAIGoogleGemini,
+    AxGen,
+    AxSignature,
+    type AxAIGoogleGeminiChatRequest,
+    type AxField,
+    type AxFieldValue,
+} from '@ax-llm/ax'
 
 /**
  * A mock fetch function to intercept API requests.
