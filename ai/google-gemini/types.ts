@@ -2,12 +2,22 @@ import type { AxMediaMimeType } from '../../dsp/types.js'
 import type { AxFunction, AxModelConfig } from '../types.js'
 
 export enum AxAIGoogleGeminiModel {
-  Gemini15Pro = 'gemini-1.5-pro-preview-0409',
-  Gemini15Flash = 'gemini-1.5-flash-preview-0514',
+  Gemini25Pro = 'gemini-2.5-pro-preview-06-05',
+  Gemini25Flash = 'gemini-2.5-flash-preview-04-17',
+  Gemini20Flash = 'gemini-2.0-flash',
+  Gemini20FlashLite = 'gemini-2.0-flash-lite-preview-02-05',
+  Gemini1Pro = 'gemini-1.0-pro',
+  Gemini15Flash = 'gemini-1.5-flash',
+  Gemini15Flash002 = 'gemini-1.5-flash-002',
+  Gemini15Flash8B = 'gemini-1.5-flash-8b',
+  Gemini15Pro = 'gemini-1.5-pro',
 }
 
 export enum AxAIGoogleGeminiEmbedModel {
+  GeminiEmbedding = 'gemini-embedding-exp-03-07',
+  TextEmbeddingLarge = 'text-embedding-large-exp-03-07',
   TextEmbedding004 = 'text-embedding-004',
+  TextEmbedding005 = 'text-embedding-005',
 }
 
 export enum AxAIGoogleGeminiSafetyCategory {
