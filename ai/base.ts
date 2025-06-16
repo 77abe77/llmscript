@@ -77,8 +77,7 @@ export class AxBaseAI<
   TChatResponse,
   TChatResponseDelta,
   TEmbedResponse,
-> implements AxAIService<TModel, TEmbedModel>
-{
+> implements AxAIService<TModel, TEmbedModel> {
   private debug = false
 
   private rt?: AxAIServiceOptions['rateLimiter']
@@ -323,10 +322,63 @@ export class AxBaseAI<
     return structuredClone(this.metrics)
   }
 
+  public async prepareChatRequest(
+    req: Readonly<AxChatRequest<TModel>>,
+    options?: Readonly<
+      AxAIPromptConfig &
+      AxAIServiceActionOptions<TModel, TEmbedModel> & { stream?: boolean }
+    >
+  ): Promise<unknown> {
+    const model = this.getModel(req.model) ?? req.model ?? this.defaults.model
+
+    const modelConfig = {
+      ...this.aiImpl.getModelConfig(),
+      ...req.modelConfig,
+    }
+
+    if (
+      options?.thinkingTokenBudget &&
+      !this.getFeatures(model).hasThinkingBudget
+    ) {
+      throw new Error(
+        `Model ${model as string} does not support thinkingTokenBudget.`
+      )
+    }
+
+    if (options?.showThoughts && !this.getFeatures(model).hasShowThoughts) {
+      throw new Error(`Model ${model as string} does not support showThoughts.`)
+    }
+
+    modelConfig.stream =
+      (options?.stream !== undefined ? options.stream : modelConfig.stream) ??
+      false
+
+    let functions: NonNullable<AxChatRequest['functions']> | undefined
+
+    if (req.functions && req.functions.length > 0) {
+      functions = req.functions.map((fn) => this.cleanupFunctionSchema(fn))
+    }
+
+    const reqWithModelAndFuncs = {
+      ...req,
+      model,
+      functions,
+      modelConfig,
+    }
+
+    const [, reqValue] = this.aiImpl.createChatReq(
+      reqWithModelAndFuncs,
+      options as AxAIPromptConfig
+    )
+
+    return reqValue
+  }
+
   async chat(
     req: Readonly<AxChatRequest<TModel>>,
     options?: Readonly<
-      AxAIPromptConfig & AxAIServiceActionOptions<TModel, TEmbedModel>
+      AxAIPromptConfig &
+      AxAIServiceActionOptions<TModel, TEmbedModel> & { stream?: boolean }
     >
   ): Promise<AxChatResponse | ReadableStream<AxChatResponse>> {
     const startTime = performance.now()
@@ -348,7 +400,8 @@ export class AxBaseAI<
   private async _chat1(
     req: Readonly<AxChatRequest<TModel>>,
     options?: Readonly<
-      AxAIPromptConfig & AxAIServiceActionOptions<TModel, TEmbedModel>
+      AxAIPromptConfig &
+      AxAIServiceActionOptions<TModel, TEmbedModel> & { stream?: boolean }
     >
   ): Promise<AxChatResponse | ReadableStream<AxChatResponse>> {
     const model = this.getModel(req.model) ?? req.model ?? this.defaults.model
@@ -857,9 +910,9 @@ export function setChatResponseEvents(
   if (res.modelUsage?.tokens) {
     const thoughTokens = res.modelUsage.tokens.thoughtsTokens
       ? {
-          [axSpanAttributes.LLM_USAGE_THOUGHTS_TOKENS]:
-            res.modelUsage.tokens.thoughtsTokens,
-        }
+        [axSpanAttributes.LLM_USAGE_THOUGHTS_TOKENS]:
+          res.modelUsage.tokens.thoughtsTokens,
+      }
       : {}
     span.addEvent(axSpanEvents.GEN_AI_USAGE, {
       [axSpanAttributes.LLM_USAGE_INPUT_TOKENS]:

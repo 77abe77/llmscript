@@ -1,12 +1,6 @@
-Running program. The raw request payload will be logged below...
---- Mock Fetch Intercepted Request ---
-URL: https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-preview-0514:generateContent?key=dummy-api-key-for-testing
-Headers: {
-  "Content-Type": "application/json",
-  "X-Request-ID": "ac2e6454-2032-4465-bdd8-938645076e10",
-  "X-Retry-Count": "0"
-}
-Request Body (Payload):
+Getting the raw request payload using program.raw()...
+
+--- Generated Raw Request Payload ---
 {
   "contents": [
     {
@@ -155,15 +149,3 @@ Request Body (Payload):
   }
 }
 ------------------------------------
-
-Program finished. Mock result received: {
-  [0mgeneratedScripts[2m:[0m [
-    {
-      [0mauthor[2m:[0m [0m[32m[0m[32m"Test Agent"[0m[0m[0m[2m,[0m
-      [0mtitle[2m:[0m [0m[32m[0m[32m"My Awesome Video"[0m[0m[0m[2m,[0m
-      [0mdescription[2m:[0m [0m[32m[0m[32m"A video about a tweet."[0m[0m[0m[2m,[0m
-      [0mmarketingGoals[2m:[0m [][0m[2m,[0m
-      [0mmoments[2m:[0m [][0m[2m,[0m
-    }
-  ][0m[2m,[0m
-}

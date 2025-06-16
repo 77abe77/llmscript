@@ -189,6 +189,17 @@ export class AxProgramWithSignature<
     throw new Error('streamingForward() not implemented')
   }
 
+  public async raw(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _ai: Readonly<AxAIService>,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _values: IN,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _options?: Readonly<AxProgramForwardOptions>
+  ): Promise<unknown> {
+    throw new Error('raw() not implemented')
+  }
+
   public setId(id: string) {
     this.key = { id, custom: true }
     for (const child of this.children) {

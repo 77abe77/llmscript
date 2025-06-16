@@ -894,6 +894,83 @@ export class AxGen<
     })
   }
 
+  public override async raw(
+    ai: Readonly<AxAIService>,
+    values: IN,
+    options?: Readonly<AxProgramForwardOptions>
+  ): Promise<unknown> {
+    const memOptions = {
+      debug: options?.debug,
+      debugHideSystemPrompt: options?.debugHideSystemPrompt,
+    }
+    const mem =
+      options?.mem ?? this.options?.mem ?? new AxMemory(10000, memOptions)
+
+    let functions: AxFunction[] | undefined = this.functions
+    if (options?.functions) {
+      functions = parseFunctions(options.functions, this.functions)
+    }
+
+    if (functions) {
+      this.promptTemplate = new (this.options?.promptTemplate ??
+        AxPromptTemplate)(this.signature, {
+          functions,
+          thoughtFieldName: this.thoughtFieldName,
+        })
+    }
+
+    let prompt
+    if (Array.isArray(values)) {
+      prompt = this.promptTemplate.render(values, {
+        examples: this.examples,
+        demos: this.demos,
+        scope: this.getScope(),
+      })
+    } else {
+      prompt = this.promptTemplate.render(values as AxGenInType, {
+        examples: this.examples,
+        demos: this.demos,
+        scope: this.getScope(),
+      })
+    }
+
+    mem.add(prompt, options?.sessionId)
+    const chatPrompt = mem.history(options?.sessionId)
+
+    const req: AxChatRequest = {
+      chatPrompt: chatPrompt,
+      functions: functions,
+      functionCall: options?.functionCall ?? this.options?.functionCall,
+      modelConfig: options?.modelConfig,
+      model: options?.model,
+      signature: this.signature,
+    }
+
+    const {
+      thinkingTokenBudget,
+      showThoughts,
+      abortSignal,
+      traceId,
+      sessionId,
+      rateLimiter,
+      stream,
+      debug,
+    } = options ?? {}
+
+    const prepared = await ai.prepareChatRequest(req, {
+      thinkingTokenBudget,
+      showThoughts,
+      abortSignal,
+      traceId,
+      sessionId,
+      rateLimiter,
+      stream: stream ?? false,
+      debug,
+    })
+
+    return prepared
+  }
+
   public override setExamples(
     examples: Readonly<AxProgramExamples>,
     options?: Readonly<AxSetExamplesOptions>

@@ -85,9 +85,20 @@ export class AxAI implements AxAIService {
 
   async chat(
     req: Readonly<AxChatRequest>,
-    options?: Readonly<AxAIPromptConfig & AxAIServiceActionOptions>
+    options?: Readonly<
+      AxAIPromptConfig & AxAIServiceActionOptions & { stream?: boolean }
+    >
   ): Promise<AxChatResponse | ReadableStream<AxChatResponse>> {
     return await this.ai.chat(req, options)
+  }
+
+  async prepareChatRequest(
+    req: Readonly<AxChatRequest>,
+    options?: Readonly<
+      AxAIPromptConfig & AxAIServiceActionOptions & { stream?: boolean }
+    >
+  ): Promise<unknown> {
+    return await this.ai.prepareChatRequest(req, options)
   }
 
   async embed(

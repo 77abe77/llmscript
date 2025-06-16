@@ -192,6 +192,7 @@ export interface AxAIService {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         traceContext?: any;
         debug?: boolean;
+        stream?: boolean;
       }
     >
   ): Promise<AxChatResponse | ReadableStream<AxChatResponse>>;
@@ -200,6 +201,20 @@ export interface AxAIService {
     req: Readonly<{ texts: readonly string[]; embedModel?: string }>,
     options?: Readonly<AxAIServiceActionOptions>
   ): Promise<AxEmbedResponse>;
+
+  prepareChatRequest(
+    req: Readonly<AxChatRequest>,
+    options?: Readonly<
+      AxAIServiceActionOptions &
+      AxAIPromptConfig & {
+        rateLimiter?: AxRateLimiterFunction;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        traceContext?: any;
+        debug?: boolean;
+        stream?: boolean;
+      }
+    >
+  ): Promise<unknown>;
 
   getOptions(): Readonly<AxAIServiceOptions>;
   getLogger(): AxLoggerFunction;

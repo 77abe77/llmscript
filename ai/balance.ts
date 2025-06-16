@@ -198,9 +198,21 @@ export class AxBalancer implements AxAIService<unknown, unknown> {
     this.serviceFailures.delete(this.currentService.getId())
   }
 
+  async prepareChatRequest(
+    req: Readonly<AxChatRequest>,
+    options?: Readonly<
+      AxAIPromptConfig & AxAIServiceActionOptions & { stream?: boolean }
+    >
+  ): Promise<unknown> {
+    this.reset()
+    return this.currentService.prepareChatRequest(req, options)
+  }
+
   async chat(
     req: Readonly<AxChatRequest>,
-    options?: Readonly<AxAIPromptConfig & AxAIServiceActionOptions> | undefined
+    options?: Readonly<
+      AxAIPromptConfig & AxAIServiceActionOptions & { stream?: boolean }
+    >
   ): Promise<AxChatResponse | ReadableStream<AxChatResponse>> {
     this.reset()
 

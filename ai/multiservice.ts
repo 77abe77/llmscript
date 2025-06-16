@@ -122,7 +122,8 @@ export class AxMultiServiceRouter implements AxAIService<string, string> {
   async chat(
     req: Readonly<AxChatRequest<string>>,
     options?: Readonly<
-      AxAIPromptConfig & AxAIServiceActionOptions<string, string>
+      AxAIPromptConfig &
+      AxAIServiceActionOptions<string, string> & { stream?: boolean }
     >
   ): Promise<AxChatResponse | ReadableStream<AxChatResponse>> {
     const modelKey = req.model
@@ -173,6 +174,37 @@ export class AxMultiServiceRouter implements AxAIService<string, string> {
 
     return await item.service.embed(
       { embedModel: embedModelKey, ...req },
+      options
+    )
+  }
+
+  async prepareChatRequest(
+    req: Readonly<AxChatRequest<string>>,
+    options?: Readonly<
+      AxAIPromptConfig &
+      AxAIServiceActionOptions<string, string> & { stream?: boolean }
+    >
+  ): Promise<unknown> {
+    const modelKey = req.model
+    if (!modelKey) {
+      throw new Error('Model key must be specified for multi-service')
+    }
+
+    const item = this.services.get(modelKey)
+    if (!item) {
+      throw new Error(`No service found for model key: ${modelKey}`)
+    }
+
+    this.lastUsedService = item.service
+
+    if (!item.model) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { model, ...reqWithoutModel } = req
+      return await item.service.prepareChatRequest(reqWithoutModel, options)
+    }
+
+    return await item.service.prepareChatRequest(
+      { model: modelKey, ...req },
       options
     )
   }
