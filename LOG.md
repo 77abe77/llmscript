@@ -1,21 +1,13 @@
 Running program. The raw request payload will be logged below...
 --- Mock Fetch Intercepted Request ---
-URL: https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-preview-0514:streamGenerateContent?alt=sse&key=dummy-api-key-for-testing
+URL: https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-preview-0514:generateContent?key=dummy-api-key-for-testing
 Headers: {
   "Content-Type": "application/json",
-  "X-Request-ID": "a34f3b3c-3288-4263-a488-5880977c475c",
+  "X-Request-ID": "ac2e6454-2032-4465-bdd8-938645076e10",
   "X-Retry-Count": "0"
 }
 Request Body (Payload):
 {
-  "systemInstruction": {
-    "role": "user",
-    "parts": [
-      {
-        "text": "## Core Instruction\nYou will be provided with the following inputs: `<tweet>`, `<organization>`, `<userInstruction>`. Your core task is to fulfill the #main-task-description using the resources available and generate the following outputs: `<generatedScripts>`.\n\n## Input Definitions\n<tweet type=\"enum\" isArray=\"true\" enumType=\"algebraic\" enumValues=\"image,video,string\" />\n<organization type=\"json\" description=\"JSON object containing details about the organization, its marketing funnels, and creator agents with their video styles and gestures\">\n    <description type=\"string\" description=\"gives an overview of organization\" />\n    <marketingFunnels type=\"json\" isArray=\"true\">\n    <description type=\"string\" description=\"Description of the marketing funnel's goal\" />\n</marketingFunnels>\n    <creatorAgents type=\"json\" isArray=\"true\">\n    <name type=\"string\" description=\"full name of the agent\" />\n    <role type=\"string\" description=\"the agents role at the organization\" />\n    <tone type=\"string\" description=\"a description of the agents voice tone\" />\n    <personality type=\"string\" description=\"a description of the agents personality\" />\n    <voice type=\"json\">\n    <id type=\"string\" description=\"Elevenlab's voice ID\" />\n</voice>\n    <videoStyles type=\"json\" isArray=\"true\">\n    <id type=\"string\" description=\"Argil Avatar ID\" />\n    <description type=\"string\" description=\"description of the camera video style/avatar scene - for LLM context only\" />\n    <gestures type=\"json\" isArray=\"true\">\n    <id type=\"string\" description=\"Argil gesture slug, e.g., 'gesture-1\" />\n    <description type=\"string\" description=\"textual description of the gesture - for LLM context only\" />\n</gestures>\n</videoStyles>\n</creatorAgents>\n</organization>\n<userInstruction type=\"string\" description=\"Text instruction from the user about the desired content.\" />\n\n## Input Referencing Guide\nAll inputs and their nested properties can be referenced anywhere in this program using XML's XPath language. The inline format looks like <ref xpath=\"//path/to/variable\" />.\n\n## Main Task Description\nBased on the <xpath>//organization</xpath> and the <xpath>//userInstruction</xpath> generate an appropriate amount of short-form video content scripts. Ensure that each script serves at least one of the <xpath>//organization/marketingFunnels</xpath>. You may generate as many scripts as you want, but ensure each script provides unique value. You have different variables to play with, such as who is the speaker (author) of the content, choosing which agent creator's voice and personality best fits the content. You must generate at least 1 script."
-      }
-    ]
-  },
   "contents": [
     {
       "role": "user",
@@ -35,6 +27,14 @@ Request Body (Payload):
       ]
     }
   ],
+  "systemInstruction": {
+    "role": "user",
+    "parts": [
+      {
+        "text": "## Core Instruction\nYou will be provided with the following inputs: `<tweet>`, `<organization>`, `<userInstruction>`. Your core task is to fulfill the #main-task-description using the resources available and generate the following outputs: `<generatedScripts>`.\n\n## Input Definitions\n<tweet type=\"enum\" isArray=\"true\" enumType=\"algebraic\" enumValues=\"image,video,string\" />\n<organization type=\"json\" description=\"JSON object containing details about the organization, its marketing funnels, and creator agents with their video styles and gestures\">\n    <description type=\"string\" description=\"gives an overview of organization\" />\n    <marketingFunnels type=\"json\" isArray=\"true\">\n    <description type=\"string\" description=\"Description of the marketing funnel's goal\" />\n</marketingFunnels>\n    <creatorAgents type=\"json\" isArray=\"true\">\n    <name type=\"string\" description=\"full name of the agent\" />\n    <role type=\"string\" description=\"the agents role at the organization\" />\n    <tone type=\"string\" description=\"a description of the agents voice tone\" />\n    <personality type=\"string\" description=\"a description of the agents personality\" />\n    <voice type=\"json\">\n    <id type=\"string\" description=\"Elevenlab's voice ID\" />\n</voice>\n    <videoStyles type=\"json\" isArray=\"true\">\n    <id type=\"string\" description=\"Argil Avatar ID\" />\n    <description type=\"string\" description=\"description of the camera video style/avatar scene - for LLM context only\" />\n    <gestures type=\"json\" isArray=\"true\">\n    <id type=\"string\" description=\"Argil gesture slug, e.g., 'gesture-1\" />\n    <description type=\"string\" description=\"textual description of the gesture - for LLM context only\" />\n</gestures>\n</videoStyles>\n</creatorAgents>\n</organization>\n<userInstruction type=\"string\" description=\"Text instruction from the user about the desired content.\" />\n\n## Input Referencing Guide\nAll inputs and their nested properties can be referenced anywhere in this program using XML's XPath language. The inline format looks like <ref xpath=\"//path/to/variable\" />.\n\n## Main Task Description\nBased on the <xpath>//organization</xpath> and the <xpath>//userInstruction</xpath> generate an appropriate amount of short-form video content scripts. Ensure that each script serves at least one of the <xpath>//organization/marketingFunnels</xpath>. You may generate as many scripts as you want, but ensure each script provides unique value. You have different variables to play with, such as who is the speaker (author) of the content, choosing which agent creator's voice and personality best fits the content. You must generate at least 1 script."
+      }
+    ]
+  },
   "generationConfig": {
     "temperature": 0,
     "topP": 0.9,
@@ -156,4 +156,14 @@ Request Body (Payload):
 }
 ------------------------------------
 
-Program finished. Mock result received: {}
+Program finished. Mock result received: {
+  [0mgeneratedScripts[2m:[0m [
+    {
+      [0mauthor[2m:[0m [0m[32m[0m[32m"Test Agent"[0m[0m[0m[2m,[0m
+      [0mtitle[2m:[0m [0m[32m[0m[32m"My Awesome Video"[0m[0m[0m[2m,[0m
+      [0mdescription[2m:[0m [0m[32m[0m[32m"A video about a tweet."[0m[0m[0m[2m,[0m
+      [0mmarketingGoals[2m:[0m [][0m[2m,[0m
+      [0mmoments[2m:[0m [][0m[2m,[0m
+    }
+  ][0m[2m,[0m
+}

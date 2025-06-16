@@ -1,8 +1,8 @@
 import type { AxAIService } from '../ai/types.js'
 import type { AxAIMemory } from '../mem/types.js'
 
-import { AxPromptTemplate, toFieldType } from './prompt.js'
 import type { AxField } from './sig.js'
+import { toFieldType } from './prompt.js'
 
 export class ValidationError extends Error {
   private fields: AxField[]
@@ -20,7 +20,11 @@ export class ValidationError extends Error {
     this.name = this.constructor.name
   }
 
-  public getFixingInstructions = () => {
+  public getFixingInstructions = (): {
+    name: string
+    title: string
+    description: string
+  }[] => {
     return this.fields.map((field) => ({
       name: 'outputError',
       title: 'Output Correction Required',
@@ -50,27 +54,31 @@ export class ValidationError extends Error {
 
 export function handleValidationError(
   mem: AxAIMemory,
-  errorFields: AxField[],
+  errorFields: { name: string; title: string; description: string }[],
   ai: Readonly<AxAIService>,
-  promptTemplate: Readonly<AxPromptTemplate>,
   sessionId?: string
 ) {
+  // The description from getFixingInstructions is the complete message for the LLM.
+  // We can just join them to form a single instructional message.
+  const userMessage = errorFields.map((f) => f.description).join('\n')
+
   mem.add(
     {
       role: 'user' as const,
-      content: promptTemplate.renderExtraFields(errorFields),
+      content: [
+        {
+          type: 'text',
+          text: `Please correct the following errors in your last response:\n${userMessage}`,
+        },
+      ],
     },
     sessionId
   )
-  mem.addTag('error')
+  mem.addTag('error', sessionId)
 
   if (ai.getOptions().debug) {
-    const errors = errorFields
-      .map((field) => `- ${field.title}: ${field.description}`)
-      .join('\n')
-
     const logger = ai.getLogger()
-    logger(`❌ Error Correction:\n${errors}`, {
+    logger(`❌ Error Correction:\n${userMessage}`, {
       tags: ['error'],
     })
   }

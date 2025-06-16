@@ -158,7 +158,7 @@ All inputs and their nested properties can be referenced anywhere in this progra
       const introPart = { text: '## Inputs\n' }
 
       // Signature Input Values
-      const inputParts = this.renderInputValues(values)
+      const inputParts = this.renderInputValues(values as T)
 
       // Scope (supplementary) Input Values
       const scopeParts: AxAIGoogleGeminiContentPart[] = []
@@ -284,7 +284,7 @@ All inputs and their nested properties can be referenced anywhere in this progra
           return v
         }
 
-        const jsonString = JSON.stringify(value, replacer, 2)
+        const jsonString = JSON.stringify(val, replacer, 2)
 
         // Split the stringified JSON by placeholders and interleave media
         const regex = /"__MEDIA_PLACEHOLDER_\d+__"/g

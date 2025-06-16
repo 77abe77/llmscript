@@ -6,7 +6,6 @@ import {
   axBaseAIDefaultConfig,
   axBaseAIDefaultCreativeConfig,
 } from '../base.js'
-import { GoogleVertexAuth } from '../google-vertex/auth.js'
 import type {
   AxAIPromptConfig,
   AxAIServiceImpl,
@@ -15,7 +14,6 @@ import type {
   AxChatResponse,
   AxChatResponseResult,
   AxEmbedResponse,
-  AxFunction,
   AxFunctionJSONSchema,
   AxInternalChatRequest,
   AxInternalEmbedRequest,
@@ -32,6 +30,7 @@ import {
   type AxAIGoogleGeminiChatResponse,
   type AxAIGoogleGeminiChatResponseDelta,
   type AxAIGoogleGeminiConfig,
+  type AxAIGoogleGeminiContent,
   AxAIGoogleGeminiEmbedModel,
   type AxAIGoogleGeminiGenerationConfig,
   AxAIGoogleGeminiModel,
@@ -266,17 +265,37 @@ class AxAIGoogleGeminiImpl
     const stream = req.modelConfig?.stream ?? this.config.stream
     this.signature = req.signature
 
-    const reqValue = (
-      Array.isArray(req.chatPrompt) && req.chatPrompt.length === 1
-        ? req.chatPrompt[0]
-        : req.chatPrompt
-    ) as AxAIGoogleGeminiChatRequest
+    const chatPrompt = req.chatPrompt as (
+      | AxAIGoogleGeminiContent
+      | AxAIGoogleGeminiChatRequest
+    )[]
 
-    if (
-      !reqValue ||
-      !('contents' in reqValue) ||
-      reqValue.contents.length === 0
-    ) {
+    let systemInstruction: AxAIGoogleGeminiContent | undefined
+    const contents: AxAIGoogleGeminiContent[] = []
+
+    // The first item in the history is always the special request object
+    // that contains the system instruction and the initial user content.
+    const initialRequest = chatPrompt[0] as
+      | AxAIGoogleGeminiChatRequest
+      | undefined
+
+    if (initialRequest && 'systemInstruction' in initialRequest) {
+      systemInstruction = initialRequest.systemInstruction
+    }
+
+    // Rebuild the `contents` array from the entire history to ensure correctness
+    // during multi-turn conversations (e.g., retries, function calls).
+    for (const item of chatPrompt) {
+      if (item && 'systemInstruction' in item && 'contents' in item) {
+        // This is the initial prompt object. We only take its `contents`.
+        contents.push(...(item.contents as AxAIGoogleGeminiContent[]))
+      } else {
+        // This is a regular turn (e.g., a past model response, function result, or a user error-correction message).
+        contents.push(item as AxAIGoogleGeminiContent)
+      }
+    }
+
+    if (contents.length === 0) {
       throw new Error('Chat prompt is empty or invalid')
     }
 
@@ -300,9 +319,7 @@ class AxAIGoogleGeminiImpl
       apiConfig.name += `${pf}key=${this.apiKey}`
     }
 
-    // We still need to merge the dynamic/runtime config with the base config
     const generationConfig: AxAIGoogleGeminiGenerationConfig = {
-      ...(reqValue.generationConfig ?? {}),
       maxOutputTokens: req.modelConfig?.maxTokens ?? this.config.maxTokens,
       temperature: req.modelConfig?.temperature ?? this.config.temperature,
       topP: req.modelConfig?.topP ?? this.config.topP,
@@ -313,7 +330,6 @@ class AxAIGoogleGeminiImpl
         req.modelConfig?.stopSequences ?? this.config.stopSequences,
     }
 
-    // Set response schema for structured output if applicable
     const outputFields = this.signature?.getOutputFields() ?? []
     const hasVisibleOutput = outputFields.some((f) => !f.isInternal)
 
@@ -325,7 +341,6 @@ class AxAIGoogleGeminiImpl
       )
     }
 
-    // Handle thinking budget overrides
     const thinkingConfig: AxAIGoogleGeminiGenerationConfig['thinkingConfig'] = {
       ...(generationConfig.thinkingConfig ?? {}),
     }
@@ -361,9 +376,9 @@ class AxAIGoogleGeminiImpl
       generationConfig.thinkingConfig = thinkingConfig
     }
 
-    // Final request to be sent
     const finalReqValue: AxAIGoogleGeminiChatRequest = {
-      ...reqValue,
+      contents,
+      systemInstruction,
       generationConfig,
     }
 
@@ -571,21 +586,15 @@ export class AxAIGoogleGemini extends AxBaseAI<
     let headers
 
     if (isVertex) {
-      let path
-      if (endpointId) {
-        path = 'endpoints'
-      } else {
-        path = 'publishers/google'
-      }
-
-      apiURL = `https://${region}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${region}/${path}`
+      apiURL = `https://${region}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${region}/publishers/google`
       if (apiKey) {
         headers = async () => ({ Authorization: `Bearer ${apiKey}` })
       } else {
-        const vertexAuth = new GoogleVertexAuth()
-        headers = async () => ({
-          Authorization: `Bearer ${await vertexAuth.getAccessToken()}`,
-        })
+        throw new Error('Google Vertex AI API key not set')
+        // const vertexAuth = new GoogleVertexAuth()
+        // headers = async () => ({
+        //   Authorization: `Bearer ${await vertexAuth.getAccessToken()}`,
+        // })
       }
     } else {
       if (!apiKey) {

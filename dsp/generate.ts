@@ -32,8 +32,8 @@ import {
 } from './asserts.js'
 import {
   type extractionState,
+  extractFinalValue,
   extractValues,
-  streamingExtractFinalValue,
   streamingExtractValues,
   streamValues,
 } from './extract.js'
@@ -58,7 +58,7 @@ import {
   type AxSetExamplesOptions,
 } from './program.js'
 import { AxPromptTemplate } from './prompt.js'
-import type { AxIField, AxSignature } from './sig.js'
+import type { AxField, AxSignature } from './sig.js'
 import type {
   AxGenIn as AxGenInType,
   AxGenOut as AxGenOutType,
@@ -403,6 +403,9 @@ export class AxGen<
           sessionId
         )
 
+        // For JSON streaming, streamingExtractValues will do nothing until the
+        // end. It's a fallback for text-based streaming. The real work happens
+        // in extractFinalValue after the loop.
         const skip = streamingExtractValues(
           this.signature,
           this.values,
@@ -415,6 +418,7 @@ export class AxGen<
           continue
         }
 
+        // Assertions and processors will only work with text-based streaming.
         if (this.streamingAsserts.length !== 0) {
           await assertStreamingAssertions(
             this.streamingAsserts,
@@ -434,6 +438,8 @@ export class AxGen<
           )
         }
 
+        // This will only yield values for text-based streaming. For JSON,
+        // it will do nothing until `extractFinalValue` populates `this.values`.
         yield* streamValues<OUT>(
           this.signature,
           content,
@@ -474,7 +480,9 @@ export class AxGen<
       )
       this.functionsExecuted = new Set([...this.functionsExecuted, ...fx])
     } else {
-      streamingExtractFinalValue(this.signature, this.values, xstate, content)
+      // This is the key step for JSON streaming. It parses the complete `content`
+      // buffer as either JSON or text.
+      extractFinalValue(this.signature, this.values, xstate, content)
 
       await assertStreamingAssertions(
         this.streamingAsserts,
@@ -505,6 +513,8 @@ export class AxGen<
         )
       }
 
+      // After `extractFinalValue`, `this.values` is populated. Now we can
+      // yield the final, complete structured object.
       yield* streamValues<OUT>(
         this.signature,
         content,
@@ -622,6 +632,9 @@ export class AxGen<
       options.mem ?? this.options?.mem ?? new AxMemory(10000, memOptions)
 
     let err: ValidationError | AxAssertionError | undefined
+    let errorFields:
+      | { name: string; title: string; description: string }[]
+      | undefined
 
     if (options?.functions && options.functions.length > 0) {
       const promptTemplateClass =
@@ -695,8 +708,6 @@ export class AxGen<
 
           return
         } catch (e) {
-          let errorFields: AxIField[] | undefined
-
           span?.recordException(e as Error)
 
           if (e instanceof ValidationError) {
@@ -731,13 +742,7 @@ export class AxGen<
           }
 
           if (errorFields) {
-            handleValidationError(
-              mem,
-              errorFields,
-              ai,
-              this.promptTemplate,
-              options.sessionId
-            )
+            handleValidationError(mem, errorFields, ai, options.sessionId)
           }
         }
       }
@@ -903,8 +908,8 @@ export type AxGenerateErrorDetails = {
   maxTokens?: number
   streaming: boolean
   signature: {
-    input: Readonly<AxIField[]>
-    output: Readonly<AxIField[]>
+    input: Readonly<AxField[]>
+    output: Readonly<AxField[]>
     description?: string
   }
 }

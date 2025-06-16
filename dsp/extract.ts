@@ -12,7 +12,7 @@ export const extractValues = (
 ) => {
   const xstate = { extractedFields: [], streamedIndex: {}, s: -1 }
   streamingExtractValues(sig, values, xstate, content)
-  streamingExtractFinalValue(sig, values, xstate, content)
+  extractFinalValue(sig, values, xstate, content)
 }
 
 export interface extractionState {
@@ -25,7 +25,7 @@ export interface extractionState {
   inBlock?: boolean
 }
 
-// Helper function to check for missing required fields
+// Helper function to check for missing required fields up to a certain index
 const checkMissingRequiredFields = (
   xstate: Readonly<extractionState>,
   values: Record<string, unknown>,
@@ -49,6 +49,23 @@ const checkMissingRequiredFields = (
   }
 }
 
+// Helper function to check for all missing required fields
+const checkAllRequiredFields = (
+  sig: Readonly<AxSignature>,
+  values: Record<string, unknown>
+) => {
+  const missingFields = sig
+    .getOutputFields()
+    .filter((field) => !field.isOptional && values[field.name] === undefined)
+
+  if (missingFields.length > 0) {
+    throw new ValidationError({
+      message: `Required ${missingFields.length === 1 ? 'field' : 'fields'} not found in final output`,
+      fields: missingFields,
+    })
+  }
+}
+
 export const streamingExtractValues = (
   sig: Readonly<AxSignature>,
   values: Record<string, unknown>,
@@ -57,6 +74,13 @@ export const streamingExtractValues = (
   content: string,
   streamingValidation: boolean = false
 ) => {
+  // If the content looks like it's a JSON stream, do nothing and wait for more content.
+  // The final parsing will be handled by extractFinalValue.
+  if (content.trim().startsWith('{')) {
+    return true
+  }
+
+  // Fallback to text/XML-based parsing if the stream does not look like JSON.
   const fields = sig.getOutputFields()
 
   for (const [index, field] of fields.entries()) {
@@ -65,7 +89,8 @@ export const streamingExtractValues = (
     }
 
     const isFirst = xstate.extractedFields.length === 0
-    const prefix = (isFirst ? '' : '\n') + field.title + ':'
+    // Use the XML tag as the prefix, not the old "FieldName:" format
+    const prefix = (isFirst ? '' : '\n') + `<${field.name}>`
     let e = matchesContent(content, prefix, xstate.s)
 
     switch (e) {
@@ -91,7 +116,11 @@ export const streamingExtractValues = (
 
     // Lets wrap up the last field which is still the current field
     if (xstate.currField) {
-      const val = content.substring(xstate.s, e).trim()
+      const endTag = `</${xstate.currField.name}>`
+      const val = content
+        .substring(xstate.s, e)
+        .replace(new RegExp(`${endTag}$`), '')
+        .trim()
       const parsedValue = validateAndParseFieldValue(xstate.currField, val)
       if (parsedValue !== undefined) {
         values[xstate.currField.name] = parsedValue
@@ -121,42 +150,46 @@ export const streamingExtractValues = (
   }
 }
 
-export const streamingExtractFinalValue = (
+export const extractFinalValue = (
   sig: Readonly<AxSignature>,
   values: Record<string, unknown>,
   // eslint-disable-next-line functional/prefer-immutable-types
   xstate: extractionState,
   content: string
 ) => {
-  if (xstate.currField) {
-    let val = content.substring(xstate.s).trim()
-
-    // Handle structured JSON output
-    if (xstate.currField.type === 'json') {
-      try {
-        const parsed = JSON.parse(content)
-        for (const key of Object.keys(parsed)) {
-          if (key in values) {
-            // value already extracted via streaming, do nothing
-          } else {
-            values[key] = parsed[key]
-          }
-        }
-        return
-      } catch (e) {
-        // Not a JSON object, treat as a normal field
-      }
+  // Try to parse the entire content as a single JSON object first.
+  // This is the primary path for Gemini's JSON mode.
+  try {
+    const trimmedContent = content.trim()
+    // A simple check to see if it looks like a JSON object
+    if (trimmedContent.startsWith('{') && trimmedContent.endsWith('}')) {
+      const parsed = JSON.parse(trimmedContent)
+      // Overwrite existing (partially streamed) values with the final, complete ones.
+      Object.assign(values, parsed)
+      // Ensure all required fields are present in the final JSON.
+      checkAllRequiredFields(sig, values)
+      return
     }
+  } catch (e) {
+    // It's not a valid JSON object, so fall through to the text-based extraction below.
+  }
+
+  // Fallback for text-based streaming (e.g., XML format)
+  if (xstate.currField) {
+    const endTag = `</${xstate.currField.name}>`
+    let val = content
+      .substring(xstate.s)
+      .replace(new RegExp(`${endTag}$`), '')
+      .trim()
 
     const parsedValue = validateAndParseFieldValue(xstate.currField, val)
     if (parsedValue !== undefined) {
       values[xstate.currField.name] = parsedValue
     }
   }
-  const sigFields = sig.getOutputFields()
 
-  // Check all previous required fields before processing current field
-  checkMissingRequiredFields(xstate, values, sigFields.length)
+  // Perform a final check of all required fields for the text-based path.
+  checkAllRequiredFields(sig, values)
 }
 
 const convertValueToType = (
@@ -276,14 +309,6 @@ export function* yieldDelta<OUT>(
   }
 }
 
-// export function getStreamingDelta(
-//   values: Record<string, unknown>,
-//   // eslint-disable-next-line functional/prefer-immutable-types
-//   xstate: extractionState
-// ) {
-//   return processStreamingDelta(values, xstate)
-// }
-
 export function* streamValues<OUT>(
   sig: Readonly<AxSignature>,
   content: string,
@@ -291,6 +316,21 @@ export function* streamValues<OUT>(
   // eslint-disable-next-line functional/prefer-immutable-types
   xstate: extractionState
 ) {
+  // If the content looks like JSON, we expect the `values` object to be populated
+  // at the end. We can then yield a single large delta.
+  const trimmedContent = content.trim()
+  if (trimmedContent.startsWith('{')) {
+    if (Object.keys(values).length > 0) {
+      // Check if this is the first time we're yielding this JSON object.
+      if (!xstate.streamedIndex['__json_yielded']) {
+        yield values as Partial<OUT>
+        xstate.streamedIndex['__json_yielded'] = 1
+      }
+    }
+    return
+  }
+
+  // Fallback to text/XML based delta streaming
   for (const prevField of xstate.prevFields ?? []) {
     const { field, s, e } = prevField
     yield* yieldDelta<OUT>(content, field, s, e, xstate)
