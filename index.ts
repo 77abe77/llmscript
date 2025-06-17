@@ -288,6 +288,7 @@ import {
   AxSignature,
   type AxField,
 } from './dsp/sig.js';
+import { mergeDeltas } from 'dsp/util.js';
 import {
   AxSimpleClassifier,
   AxSimpleClassifierClass,
@@ -364,6 +365,7 @@ import { type AxAIMemory } from './mem/types.js';
 import { type AxMCPTransport } from './mcp/transport.js';
 
 // Value exports
+export { mergeDeltas };
 export { AxAI };
 export { AxAIDeepSeekModel };
 export { AxAIGoogleGemini };

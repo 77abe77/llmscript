@@ -2,146 +2,61 @@
 
 /**
  * This script is designed to test the programmatic creation of signatures
- * with `AxProgramWithSignature` and inspect the raw request payload sent
- * to the Google Gemini API.
+ * with `AxProgramWithSignature` and demonstrates how to handle streaming
+ * responses from the Google Gemini API.
  *
- * It uses a mock `fetch` function to intercept the API call, so no real
- * requests are sent. It also demonstrates the use of the `@ax-llm/ax` path alias.
+ * It uses a real API key from environment variables to send a request
+ * and processes the streaming output delta by delta.
  */
 
 import {
     AxAIGoogleGemini,
     AxGen,
     AxSignature,
-    type AxAIGoogleGeminiChatRequest,
+    mergeDeltas,
     type AxField,
-    type AxFieldValue,
+    type AxGenOut,
 } from '@ax-llm/ax'
 
-/**
- * A mock fetch function to intercept API requests.
- * It logs the request payload and returns a dummy response.
- */
-const mockFetch = async (
-    url: RequestInfo | URL,
-    options?: RequestInit
-): Promise<Response> => {
-    console.log('--- Mock Fetch Intercepted Request ---')
-    console.log('URL:', url.toString())
-    console.log('Headers:', JSON.stringify(options?.headers, null, 2))
+// Helper function to reconstruct the final object from streaming deltas.
+// It's imported from the library, but shown here for clarity.
+/*
+function mergeDeltas<OUT extends AxGenOut>(
+  base: Partial<AxGenOut>,
+  delta: Partial<AxGenOut>
+): OUT {
+  for (const key of Object.keys(delta)) {
+    const baseValue = base[key];
+    const deltaValue = delta[key];
 
-    let requestBody: AxAIGoogleGeminiChatRequest | undefined
-    if (options?.body) {
-        console.log('Request Body (Payload):')
-        // The body is a JSON string, so we parse it for pretty printing
-        requestBody = JSON.parse(options.body as string)
-        console.log(JSON.stringify(requestBody, null, 2))
-    }
-    console.log('------------------------------------')
-
-    // Return a plausible dummy response to prevent downstream code from crashing.
-    const isStreaming = url.toString().includes('streamGenerateContent')
-
-    if (isStreaming) {
-        // This part is for streaming, which is not the primary focus of this test's error.
-        const stream = new ReadableStream({
-            start(controller) {
-                const mockJsonResponse = {
-                    generatedScripts: [
-                        {
-                            author: 'Test Agent',
-                            title: 'My Awesome Video',
-                            description: 'A video about a tweet.',
-                            marketingGoals: [],
-                            moments: [],
-                        },
-                    ],
-                };
-                const responseChunk = {
-                    candidates: [
-                        {
-                            content: {
-                                role: 'model',
-                                parts: [{ text: JSON.stringify(mockJsonResponse) }],
-                            },
-                        },
-                    ],
-                }
-                const sseEvent = `data: ${JSON.stringify(responseChunk)}\n\n`
-                controller.enqueue(new TextEncoder().encode(sseEvent))
-                controller.close()
-            },
-        })
-        return new Response(stream, {
-            headers: { 'Content-Type': 'text/event-stream' },
-        })
+    if (baseValue === undefined && Array.isArray(deltaValue)) {
+      base[key] = [...deltaValue];
+    } else if (Array.isArray(baseValue) && Array.isArray(deltaValue)) {
+      base[key] = [...(baseValue ?? []), ...deltaValue];
+    } else if (
+      (baseValue === undefined || typeof baseValue === 'string') &&
+      typeof deltaValue === 'string'
+    ) {
+      base[key] = (baseValue ?? '') + deltaValue;
     } else {
-        // This is the non-streaming path.
-        // The core issue is that the validator fails, and the retry logic gets confused.
-        // To make the test robust, we'll make the mock always return the expected JSON
-        // if the request indicates it wants JSON output, which it should.
-        const useJsonOutput =
-            requestBody?.generationConfig?.responseMimeType === 'application/json'
-
-        let responseText: string;
-
-        // **FIX:** Prioritize returning the correct JSON structure if requested.
-        // The original mock had a path that would return plain text, causing the initial validation failure.
-        if (useJsonOutput) {
-            const mockJsonResponse = {
-                generatedScripts: [
-                    {
-                        author: 'Test Agent',
-                        title: 'My Awesome Video',
-                        description: 'A video about a tweet.',
-                        marketingGoals: [],
-                        moments: [],
-                    },
-                ],
-            }
-            responseText = JSON.stringify(mockJsonResponse)
-        } else {
-            // This is the fallback that was likely causing the initial error.
-            // A real LLM, when asked for JSON, would not return this.
-            responseText = 'Error: Expected to generate JSON but did not.';
-        }
-
-        const responseBody = {
-            candidates: [
-                {
-                    content: {
-                        role: 'model',
-                        parts: [
-                            {
-                                text: responseText,
-                            },
-                        ],
-                    },
-                    finishReason: 'STOP',
-                },
-            ],
-            usageMetadata: {
-                promptTokenCount: 10,
-                candidatesTokenCount: 5,
-                totalTokenCount: 15,
-            },
-        }
-        return new Response(JSON.stringify(responseBody), {
-            headers: { 'Content-Type': 'application/json' },
-        })
+      base[key] = deltaValue;
     }
+  }
+  return base as OUT;
 }
+*/
 
 async function main() {
-    // 1. Setup the AI Service with our mocked fetch function
+    // 1. Setup the AI Service with a real API key from environment variables
+    const apiKey = process.env.GEMINI_API_KEY || 'AIzaSyBFlsTmUDPA-fXDVYHbZIgJnvgYxekQa3I'
+    if (!apiKey) {
+        throw new Error(
+            'GEMINI_API_KEY environment variable not set. Please provide your API key.'
+        )
+    }
+
     const ai = new AxAIGoogleGemini({
-        apiKey: 'dummy-api-key-for-testing', // No real key needed
-        options: {
-            // @ts-ignore - The mock fetch signature is compatible enough for this test
-            fetch: mockFetch,
-            // Disable streaming for this specific test to simplify debugging the core logic
-            stream: false
-        },
+        apiKey: apiKey,
     })
 
     // 2. Define a signature programmatically using the new AxSignature class
@@ -416,22 +331,50 @@ async function main() {
         },
     }
 
-    const scopeValue: AxFieldValue = [
-        {
-            mimeType: 'image/jpeg',
-            fileUri: 'gs://bucket/landscape.jpg',
-        },
-        // You can add more items here, e.g., a video or text
-        // { mimeType: 'video/mp4', fileUri: 'gs://bucket/another.mp4' },
-        // "This is a text part of the tweet"
-    ]
+    // const scopeValue: AxFieldValue = [
+    //     {
+    //         mimeType: 'image/jpeg',
+    //         fileUri: 'gs://bucket/landscape.jpg',
+    //     },
+    //     // You can add more items here, e.g., a video or text
+    //     // { mimeType: 'video/mp4', fileUri: 'gs://bucket/another.mp4' },
+    //     // "This is a text part of the tweet"
+    // ]
 
-    scriptCreatorProgram.updateScope(scopeField, scopeValue)
+    // scriptCreatorProgram.updateScope(scopeField, scopeValue)
 
-    // 5. Run the program. The mockFetch function will log the raw request.
-    const result = await scriptCreatorProgram.forward(ai, input, { stream: false })
+    // 5. Run the program with streaming and handle the output.
+    console.log('\nRunning program with streaming. Deltas will be logged below...');
 
-    console.log('\nProgram finished. Mock result received:', result)
+    const stream = scriptCreatorProgram.streamingForward(ai, input);
+
+    // Use a buffer to reconstruct the final object from the deltas
+    let resultBuffer: Partial<AxGenOut> = {};
+    let currentVersion = -1;
+
+    for await (const { version, delta } of stream) {
+        if (version !== currentVersion) {
+            // A retry has occurred, reset the buffer
+            if (currentVersion !== -1) {
+                console.log(`\n--- Retry detected (version ${currentVersion} -> ${version}). Resetting buffer. ---\n`);
+            }
+            resultBuffer = {};
+            currentVersion = version;
+        }
+
+        // Gemini JSON mode streams the full object at the end. For other models or
+        // non-JSON-mode responses, you would see multiple smaller deltas.
+        // This code handles both cases correctly.
+        console.log('📦'); // Print a box for each delta received
+        console.log(delta); // Print a box for each delta received
+
+        // Merge the delta into our result buffer
+        resultBuffer = mergeDeltas(resultBuffer, delta);
+    }
+
+    console.log('\n\n--- Stream Finished ---');
+    console.log('\nFinal reconstructed result:');
+    console.log(JSON.stringify(resultBuffer, null, 2));
 }
 
 main().catch(console.error)
