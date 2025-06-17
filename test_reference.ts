@@ -48,7 +48,7 @@ function mergeDeltas<OUT extends AxGenOut>(
 
 async function main() {
     // 1. Setup the AI Service with a real API key from environment variables
-    const apiKey = process.env.GEMINI_API_KEY || 'AIzaSyBFlsTmUDPA-fXDVYHbZIgJnvgYxekQa3I'
+    const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {
         throw new Error(
             'GEMINI_API_KEY environment variable not set. Please provide your API key.'
