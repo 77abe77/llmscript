@@ -5,10 +5,7 @@
   "description": "The best library to work with LLMs",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ax-llm/ax.git"
-  },
-  "publishConfig": {
-    "access": "public"
+    "url": "https://github.com/77abe77/llmscript.git"
   },
   "license": "Apache-2.0",
   "keywords": [],
@@ -30,14 +27,7 @@
     "google-auth-library": "^9.15.1",
     "moment-timezone": "^0.5.47"
   },
-  "files": [
-    "**/*"
-  ],
-  "bugs": {
-    "url": "https://github.com/@ax-llm/ax/issues"
-  },
-  "homepage": "https://github.com/@ax-llm/ax#readme",
-  "author": "Vikram <https://twitter.com/dosco>",
+  "author": "",
   "devDependencies": {
     "@total-typescript/tsconfig": "^1.0.4",
     "@types/node": "^22.13.10",
